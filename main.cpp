@@ -2,16 +2,77 @@
 
 #define GLFW_INCLUDE_NONE
 #include<GLFW/glfw3.h>
+#include<glm/glm.hpp>
 
 #include <iostream>
 #include <fstream>
 
+#define VMA_IMPLEMENTATION
+#include "vk_mem_alloc.h"
+
 static const int WINDOW_WIDTH = 1920;
 static const int WINDOW_HEIGHT = 1080;
 
-std::vector<uint32_t> readFile(const std::string& filename) {
+class Allocator {
+public:
+	Allocator(VkInstance instance, VkPhysicalDevice physicalDevice, VkDevice device) {
+		VmaAllocatorCreateInfo vmaAllocatorInfo{};
+		vmaAllocatorInfo.instance = instance;
+		vmaAllocatorInfo.physicalDevice = physicalDevice;
+		vmaAllocatorInfo.device = device;
+		vmaCreateAllocator(&vmaAllocatorInfo, &m_allocator);
+	}
+	Allocator(const Allocator&) = delete;
+
+	~Allocator() { vmaDestroyAllocator(m_allocator); }
+
+	operator VmaAllocator() const { return m_allocator; }
+private:
+	VmaAllocator m_allocator;
+};
+
+class AllocatedBuffer {
+public:
+	AllocatedBuffer(VmaAllocator allocator, size_t size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage) : m_allocator(allocator) {
+		VkBufferCreateInfo bufferInfo{};
+		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufferInfo.size = size;
+		bufferInfo.usage = bufferUsage;
+
+		VmaAllocationCreateInfo vmaAllocInfo{};
+		vmaAllocInfo.usage = memoryUsage;
+		vmaCreateBuffer(m_allocator, &bufferInfo, &vmaAllocInfo, &m_buffer, &m_allocation, nullptr);
+	}
+	AllocatedBuffer(const AllocatedBuffer&) = delete;
+
+	~AllocatedBuffer() {
+		vmaDestroyBuffer(m_allocator, m_buffer, m_allocation);
+	}
+
+	void* map() const {
+		void* data;
+		vmaMapMemory(m_allocator, m_allocation, &data);
+		return data;
+	}
+	void unmap() const { vmaUnmapMemory(m_allocator, m_allocation); }
+
+	operator VkBuffer() const { return m_buffer; }
+private:
+	VmaAllocator m_allocator;
+	VkBuffer m_buffer;
+	VmaAllocation m_allocation;
+};
+
+struct Vertex {
+	glm::vec3 position;
+	glm::vec3 color;
+};
+
+std::vector<uint32_t> readShader(const std::string& filename) {
 	std::ifstream file(filename, std::ios::ate | std::ios::binary);
-	size_t fileSize = static_cast<size_t>(file.tellg());
+	if (!file.is_open())
+		throw std::runtime_error("failed to open file \"" + filename + "\"!");
+	size_t fileSize = file.tellg();
 	std::vector<uint32_t> buffer(fileSize / 4);
 	file.seekg(0);
 	file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
@@ -51,7 +112,7 @@ int main() {
 	// create surface
 	/////////////////////////////////////////////////////////////////////////////////////////////
 	VkSurfaceKHR surf;
-	glfwCreateWindowSurface(static_cast<VkInstance>(*instance), window, nullptr, &surf);
+	glfwCreateWindowSurface(*instance, window, nullptr, &surf);
 	vk::raii::SurfaceKHR surface(instance, surf);
 
 	// create physical device
@@ -87,13 +148,20 @@ int main() {
 	vk::raii::Device device(physicalDevice, deviceInfo);
 	vk::raii::Queue queue = device.getQueue(queueFamilyIndex, 0);
 
+	// create command pool and command buffer
+	/////////////////////////////////////////////////////////////////////////////////////////////
+	vk::CommandPoolCreateInfo cmdPoolInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, queueFamilyIndex);
+	vk::raii::CommandPool cmdPool(device, cmdPoolInfo);
+	vk::CommandBufferAllocateInfo allocateInfo(*cmdPool, vk::CommandBufferLevel::ePrimary, 1);
+	vk::raii::CommandBuffers cmdBufs(device, allocateInfo);
+	vk::raii::CommandBuffer cmdBuf(std::move(cmdBufs[0]));
 
 	// create swapchain and image views
 	/////////////////////////////////////////////////////////////////////////////////////////////
 	vk::SurfaceCapabilitiesKHR surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(*surface);
 	vk::Format swapchainFormat = vk::Format::eB8G8R8A8Srgb;
 	vk::Extent2D swapchainExtent = surfaceCapabilities.currentExtent;
-	vk::SwapchainCreateInfoKHR swapchainInfo({}, *surface, surfaceCapabilities.minImageCount + 1, swapchainFormat, vk::ColorSpaceKHR::eSrgbNonlinear, surfaceCapabilities.currentExtent, 1, vk::ImageUsageFlagBits::eColorAttachment);
+	vk::SwapchainCreateInfoKHR swapchainInfo({}, *surface, surfaceCapabilities.minImageCount + 1, swapchainFormat, vk::ColorSpaceKHR::eSrgbNonlinear, swapchainExtent, 1, vk::ImageUsageFlagBits::eColorAttachment);
 	swapchainInfo.clipped = VK_TRUE;
 	swapchainInfo.presentMode = vk::PresentModeKHR::eMailbox;
 	vk::raii::SwapchainKHR swapchain(device, swapchainInfo);
@@ -120,7 +188,6 @@ int main() {
 	vk::AttachmentReference colorAttachmentRef(0, vk::ImageLayout::eColorAttachmentOptimal);
 
 	vk::SubpassDescription subpass({}, vk::PipelineBindPoint::eGraphics, {}, colorAttachmentRef);
-	// check this
 	vk::SubpassDependency dependency(VK_SUBPASS_EXTERNAL, 0, vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eColorAttachmentOutput, {}, vk::AccessFlagBits::eColorAttachmentWrite);
 
 	vk::RenderPassCreateInfo renderPassInfo({}, colorAttachment, subpass, dependency);
@@ -128,8 +195,8 @@ int main() {
 
 	// create gbuffer shader modules
 	/////////////////////////////////////////////////////////////////////////////////////////////
-	std::vector<uint32_t> gbufferVertCode = readFile("shaders/gbuffer.vert.spv");
-	std::vector<uint32_t> gbufferFragCode = readFile("shaders/gbuffer.frag.spv");
+	std::vector<uint32_t> gbufferVertCode = readShader("shaders/gbuffer.vert.spv");
+	std::vector<uint32_t> gbufferFragCode = readShader("shaders/gbuffer.frag.spv");
 
 	vk::ShaderModuleCreateInfo gbufferVertInfo({}, gbufferVertCode);
 	vk::ShaderModuleCreateInfo gbufferFragInfo({}, gbufferFragCode);
@@ -141,16 +208,31 @@ int main() {
 	vk::PipelineLayoutCreateInfo layoutInfo({}, {});
 	vk::raii::PipelineLayout gbufferLayout(device, layoutInfo);
 
+	// create vertex buffer
+	/////////////////////////////////////////////////////////////////////////////////////////////
+	Allocator vmaAllocator(*instance, *physicalDevice, *device);
+
+	std::vector<Vertex> vertices = { {glm::vec3(0.0f, -0.5f, 0.0f), glm::vec3(1.0f, 0.0f, 0.0f)}, {glm::vec3(0.5f, 0.5f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f)}, {glm::vec3(-0.5f, 0.5f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)} };
+	AllocatedBuffer vertexBuffer(vmaAllocator, vertices.size() * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	void* vertexData = vertexBuffer.map();
+	memcpy(vertexData, vertices.data(), vertices.size() * sizeof(Vertex));
+	vertexBuffer.unmap();
+
 	// create gbuffer pipeline
 	/////////////////////////////////////////////////////////////////////////////////////////////
 	vk::PipelineShaderStageCreateInfo gbufferVertStage({}, vk::ShaderStageFlagBits::eVertex, *gbufferVertModule, "main");
 	vk::PipelineShaderStageCreateInfo gbufferFragStage({}, vk::ShaderStageFlagBits::eFragment, *gbufferFragModule, "main");
 	std::array<vk::PipelineShaderStageCreateInfo, 2> gbufferShaderStages = { gbufferVertStage, gbufferFragStage };
 
-	vk::PipelineVertexInputStateCreateInfo vertexInputInfo;
+	vk::VertexInputBindingDescription vertexBinding(0, sizeof(Vertex));
+	vk::VertexInputAttributeDescription positionAttribute(0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, position));
+	vk::VertexInputAttributeDescription colorAttribute(1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, color));
+	std::array<vk::VertexInputAttributeDescription, 2> vertexAttributes = { positionAttribute, colorAttribute };
+	vk::PipelineVertexInputStateCreateInfo vertexInputInfo({}, vertexBinding, vertexAttributes);
+
 	vk::PipelineInputAssemblyStateCreateInfo inputAssemblyInfo({}, vk::PrimitiveTopology::eTriangleList);
 
-	vk::Viewport viewport(0.0f, 0.0f, static_cast<float>(swapchainExtent.width), static_cast<float>(swapchainExtent.height), 0.0f, 1.0f);
+	vk::Viewport viewport(0.0f, 0.0f, swapchainExtent.width, swapchainExtent.height, 0.0f, 1.0f);
 	vk::Rect2D scissor({ 0, 0 }, swapchainExtent);
 	vk::PipelineViewportStateCreateInfo viewportInfo({}, viewport, scissor);
 
@@ -175,14 +257,6 @@ int main() {
 		gbufferFramebuffers.push_back(vk::raii::Framebuffer(device, frameBufferInfo));
 	}
 
-	// create command pool and command buffer
-	/////////////////////////////////////////////////////////////////////////////////////////////
-	vk::CommandPoolCreateInfo cmdPoolInfo(vk::CommandPoolCreateFlagBits::eResetCommandBuffer, queueFamilyIndex);
-	vk::raii::CommandPool cmdPool(device, cmdPoolInfo);
-	vk::CommandBufferAllocateInfo allocateInfo(*cmdPool, vk::CommandBufferLevel::ePrimary, 1);
-	vk::raii::CommandBuffers cmdBufs(device, allocateInfo);
-	vk::raii::CommandBuffer cmdBuf(std::move(cmdBufs[0]));
-
 	// render loop
 	/////////////////////////////////////////////////////////////////////////////////////////////
 	vk::raii::Semaphore imageAcquiredSemaphore(device, vk::SemaphoreCreateInfo());
@@ -190,7 +264,7 @@ int main() {
 	vk::raii::Fence inFlightFence(device, vk::FenceCreateInfo(vk::FenceCreateFlagBits::eSignaled));
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
-		
+
 		vk::Result result;
 		result = device.waitForFences(*inFlightFence, VK_TRUE, UINT64_MAX);
 		device.resetFences(*inFlightFence);
@@ -203,7 +277,8 @@ int main() {
 		vk::RenderPassBeginInfo gbufferPassBeginInfo(*gbufferPass, *gbufferFramebuffers[imageIndex], scissor, clearCol);
 		cmdBuf.beginRenderPass(gbufferPassBeginInfo, vk::SubpassContents::eInline);
 		cmdBuf.bindPipeline(vk::PipelineBindPoint::eGraphics, *gbufferPipeline);
-		cmdBuf.draw(3, 1, 0, 0);
+		cmdBuf.bindVertexBuffers(0, vk::Buffer(vertexBuffer), { 0 });
+		cmdBuf.draw(vertices.size(), 1, 0, 0);
 		cmdBuf.endRenderPass();
 		cmdBuf.end();
 
@@ -214,6 +289,8 @@ int main() {
 		vk::PresentInfoKHR presentInfo(*renderFinishedSemaphore, *swapchain, imageIndex);
 		result = queue.presentKHR(presentInfo);
 	}
+
+	device.waitIdle();
 
 	glfwDestroyWindow(window);
 	glfwTerminate();
