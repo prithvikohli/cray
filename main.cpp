@@ -1,8 +1,11 @@
 #include <vulkan/vulkan_raii.hpp>
 
 #define GLFW_INCLUDE_NONE
-#include<GLFW/glfw3.h>
-#include<glm/glm.hpp>
+#include <GLFW/glfw3.h>
+
+#define GLM_FORCE_RADIANS
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <iostream>
 #include <fstream>
@@ -98,7 +101,13 @@ private:
 
 struct Vertex {
 	glm::vec3 position;
-	glm::vec3 color;
+	glm::vec3 normal;
+};
+
+struct CameraUniforms {
+	glm::mat4 model;
+	glm::mat4 view;
+	glm::mat4 proj;
 };
 
 std::vector<uint32_t> readShader(const std::string& filename) {
@@ -258,18 +267,62 @@ int main() {
 	vk::raii::ShaderModule gbufferVertModule(device, gbufferVertInfo);
 	vk::raii::ShaderModule gbufferFragModule(device, gbufferFragInfo);
 
+	// create camera uniforms buffer
+	/////////////////////////////////////////////////////////////////////////////////////////////
+	CameraUniforms camUniforms;
+	camUniforms.model = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	camUniforms.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	camUniforms.proj = glm::perspective(glm::radians(45.0f), swapchainExtent.width / (float)swapchainExtent.height, 0.1f, 10.0f);
+	camUniforms.proj[1][1] *= -1;
+
+	AllocatedBuffer uniformBuffer(vmaAllocator, sizeof(CameraUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	void* uniformData = uniformBuffer.map();
+	memcpy(uniformData, &camUniforms, sizeof(CameraUniforms));
+	uniformBuffer.unmap();
+
+	// create descriptor pool and descriptor set
+	/////////////////////////////////////////////////////////////////////////////////////////////
+	vk::DescriptorPoolSize descriptorPoolSize(vk::DescriptorType::eUniformBuffer, 1);
+	vk::DescriptorPoolCreateInfo descriptorPoolInfo(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 1, descriptorPoolSize);
+	vk::raii::DescriptorPool descriptorPool(device, descriptorPoolInfo);
+
+	vk::DescriptorSetLayoutBinding descriptorSetLayoutBinding(0, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex);
+	vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutInfo({}, descriptorSetLayoutBinding);
+	vk::raii::DescriptorSetLayout descriptorSetLayout(device, descriptorSetLayoutInfo);
+	vk::DescriptorSetAllocateInfo descriptorSetAllocateInfo(*descriptorPool, *descriptorSetLayout);
+	vk::raii::DescriptorSets descriptorSets(device, descriptorSetAllocateInfo);
+	vk::raii::DescriptorSet descriptorSet(std::move(descriptorSets[0]));
+
+	// update descriptor set
+	/////////////////////////////////////////////////////////////////////////////////////////////
+	vk::DescriptorBufferInfo descriptorBufferInfo(vk::Buffer(uniformBuffer), 0, sizeof(CameraUniforms));
+	vk::WriteDescriptorSet writeDescriptorSet(*descriptorSet, 0, 0, vk::DescriptorType::eUniformBuffer, {}, descriptorBufferInfo);
+	device.updateDescriptorSets(writeDescriptorSet, {});
+
 	// create gbuffer pipeline layout
 	/////////////////////////////////////////////////////////////////////////////////////////////
-	vk::PipelineLayoutCreateInfo layoutInfo({}, {});
+	vk::PipelineLayoutCreateInfo layoutInfo({}, *descriptorSetLayout);
 	vk::raii::PipelineLayout gbufferLayout(device, layoutInfo);
 
-	// create vertex buffer
+	// create vertex and index buffer
 	/////////////////////////////////////////////////////////////////////////////////////////////
-	std::vector<Vertex> vertices = { {glm::vec3(0.0f, -0.5f, 0.0f), glm::vec3(1.0f, 0.0f, 0.0f)}, {glm::vec3(0.5f, 0.5f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f)}, {glm::vec3(-0.5f, 0.5f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)} };
+	const std::vector<Vertex> vertices = {
+		{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
+		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
+		{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
+		{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}
+	};
+	const std::vector<uint16_t> indices = { 0, 1, 2, 2, 3, 0 };
+
 	AllocatedBuffer vertexBuffer(vmaAllocator, vertices.size() * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	void* vertexData = vertexBuffer.map();
 	memcpy(vertexData, vertices.data(), vertices.size() * sizeof(Vertex));
 	vertexBuffer.unmap();
+
+	AllocatedBuffer indexBuffer(vmaAllocator, indices.size() * sizeof(uint16_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+	void* indexData = indexBuffer.map();
+	memcpy(indexData, indices.data(), indices.size() * sizeof(uint16_t));
+	indexBuffer.unmap();
 
 	// create gbuffer pipeline
 	/////////////////////////////////////////////////////////////////////////////////////////////
@@ -279,8 +332,8 @@ int main() {
 
 	vk::VertexInputBindingDescription vertexBinding(0, sizeof(Vertex));
 	vk::VertexInputAttributeDescription positionAttribute(0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, position));
-	vk::VertexInputAttributeDescription colorAttribute(1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, color));
-	std::array<vk::VertexInputAttributeDescription, 2> vertexAttributes = { positionAttribute, colorAttribute };
+	vk::VertexInputAttributeDescription normalAttribute(1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, normal));
+	std::array<vk::VertexInputAttributeDescription, 2> vertexAttributes = { positionAttribute, normalAttribute };
 	vk::PipelineVertexInputStateCreateInfo vertexInputInfo({}, vertexBinding, vertexAttributes);
 
 	vk::PipelineInputAssemblyStateCreateInfo inputAssemblyInfo({}, vk::PrimitiveTopology::eTriangleList);
@@ -290,7 +343,7 @@ int main() {
 	vk::PipelineViewportStateCreateInfo viewportInfo({}, viewport, scissor);
 
 	vk::PipelineRasterizationStateCreateInfo rasterizerInfo;
-	rasterizerInfo.frontFace = vk::FrontFace::eClockwise;
+	rasterizerInfo.frontFace = vk::FrontFace::eCounterClockwise;
 	rasterizerInfo.cullMode = vk::CullModeFlagBits::eBack;
 	rasterizerInfo.lineWidth = 1.0f;
 	vk::PipelineMultisampleStateCreateInfo multisampleInfo;
@@ -334,7 +387,9 @@ int main() {
 		cmdBuf.beginRenderPass(gbufferPassBeginInfo, vk::SubpassContents::eInline);
 		cmdBuf.bindPipeline(vk::PipelineBindPoint::eGraphics, *gbufferPipeline);
 		cmdBuf.bindVertexBuffers(0, vk::Buffer(vertexBuffer), { 0 });
-		cmdBuf.draw(vertices.size(), 1, 0, 0);
+		cmdBuf.bindIndexBuffer(vk::Buffer(indexBuffer), { 0 }, vk::IndexType::eUint16);
+		cmdBuf.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *gbufferLayout, 0, *descriptorSet, {});
+		cmdBuf.drawIndexed(indices.size(), 1, 0, 0, 0);
 		cmdBuf.endRenderPass();
 		cmdBuf.end();
 
