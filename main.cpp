@@ -45,9 +45,7 @@ public:
 	}
 	AllocatedBuffer(const AllocatedBuffer&) = delete;
 
-	~AllocatedBuffer() {
-		vmaDestroyBuffer(m_allocator, m_buffer, m_allocation);
-	}
+	~AllocatedBuffer() { vmaDestroyBuffer(m_allocator, m_buffer, m_allocation); }
 
 	void* map() const {
 		void* data;
@@ -61,6 +59,41 @@ private:
 	VmaAllocator m_allocator;
 	VkBuffer m_buffer;
 	VmaAllocation m_allocation;
+};
+
+class AllocatedImage {
+public:
+	AllocatedImage(VmaAllocator allocator, VkFormat format, VkExtent3D extent, VkImageUsageFlags imageUsage, VmaMemoryUsage memoryUsage) : m_allocator(allocator), m_format(format), m_extent(extent) {
+		VkImageCreateInfo imageInfo{};
+		imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+		imageInfo.imageType = VK_IMAGE_TYPE_2D;
+		imageInfo.format = m_format;
+		imageInfo.extent = m_extent;
+		imageInfo.arrayLayers = 1;
+		imageInfo.mipLevels = 1;
+		imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+		imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+		imageInfo.usage = imageUsage;
+
+		VmaAllocationCreateInfo vmaAllocInfo{};
+		vmaAllocInfo.usage = memoryUsage;
+		vmaCreateImage(m_allocator, &imageInfo, &vmaAllocInfo, &m_image, &m_allocation, nullptr);
+	}
+	AllocatedImage(const AllocatedImage&) = delete;
+
+	~AllocatedImage() { vmaDestroyImage(m_allocator, m_image, m_allocation); }
+
+	VkFormat getFormat() const { return m_format; }
+	VkExtent3D getExtent() const { return m_extent; }
+
+	operator VkImage() const { return m_image; }
+private:
+	VmaAllocator m_allocator;
+	VkImage m_image;
+	VmaAllocation m_allocation;
+
+	VkFormat m_format;
+	VkExtent3D m_extent;
 };
 
 struct Vertex {
@@ -180,6 +213,20 @@ int main() {
 		swapchainViews.push_back(vk::raii::ImageView(device, viewInfo));
 	}
 
+	// create depth buffer
+	/////////////////////////////////////////////////////////////////////////////////////////////
+	Allocator vmaAllocator(*instance, *physicalDevice, *device);
+
+	AllocatedImage depthImage(vmaAllocator, VK_FORMAT_D32_SFLOAT, { swapchainExtent.width, swapchainExtent.height, 1 }, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+
+	vk::ImageViewCreateInfo viewInfo({}, vk::Image(depthImage), vk::ImageViewType::e2D, vk::Format(depthImage.getFormat()));
+	viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
+	viewInfo.subresourceRange.levelCount = 1;
+	viewInfo.subresourceRange.baseMipLevel = 0;
+	viewInfo.subresourceRange.layerCount = 1;
+	viewInfo.subresourceRange.baseArrayLayer = 0;
+	vk::raii::ImageView depthView(device, viewInfo);
+
 	// create gbuffer renderpass
 	/////////////////////////////////////////////////////////////////////////////////////////////
 	vk::AttachmentDescription colorAttachment({}, swapchainFormat);
@@ -187,10 +234,18 @@ int main() {
 	colorAttachment.finalLayout = vk::ImageLayout::ePresentSrcKHR;
 	vk::AttachmentReference colorAttachmentRef(0, vk::ImageLayout::eColorAttachmentOptimal);
 
-	vk::SubpassDescription subpass({}, vk::PipelineBindPoint::eGraphics, {}, colorAttachmentRef);
+	vk::AttachmentDescription depthAttachment({}, vk::Format(depthImage.getFormat()));
+	depthAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+	depthAttachment.stencilLoadOp = vk::AttachmentLoadOp::eClear;
+	depthAttachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+	depthAttachment.finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+	vk::AttachmentReference depthAttachmentRef(1, vk::ImageLayout::eDepthStencilAttachmentOptimal);
+
+	vk::SubpassDescription subpass({}, vk::PipelineBindPoint::eGraphics, {}, colorAttachmentRef, {}, &depthAttachmentRef);
 	vk::SubpassDependency dependency(VK_SUBPASS_EXTERNAL, 0, vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eColorAttachmentOutput, {}, vk::AccessFlagBits::eColorAttachmentWrite);
 
-	vk::RenderPassCreateInfo renderPassInfo({}, colorAttachment, subpass, dependency);
+	std::array<vk::AttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
+	vk::RenderPassCreateInfo renderPassInfo({}, attachments, subpass, dependency);
 	vk::raii::RenderPass gbufferPass(device, renderPassInfo);
 
 	// create gbuffer shader modules
@@ -210,8 +265,6 @@ int main() {
 
 	// create vertex buffer
 	/////////////////////////////////////////////////////////////////////////////////////////////
-	Allocator vmaAllocator(*instance, *physicalDevice, *device);
-
 	std::vector<Vertex> vertices = { {glm::vec3(0.0f, -0.5f, 0.0f), glm::vec3(1.0f, 0.0f, 0.0f)}, {glm::vec3(0.5f, 0.5f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f)}, {glm::vec3(-0.5f, 0.5f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f)} };
 	AllocatedBuffer vertexBuffer(vmaAllocator, vertices.size() * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 	void* vertexData = vertexBuffer.map();
@@ -245,7 +298,9 @@ int main() {
 	colorBlendAttachmentInfo.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
 	vk::PipelineColorBlendStateCreateInfo colorBlendInfo({}, VK_FALSE, vk::LogicOp::eNoOp, colorBlendAttachmentInfo);
 
-	vk::GraphicsPipelineCreateInfo pipelineInfo({}, gbufferShaderStages, &vertexInputInfo, &inputAssemblyInfo, nullptr, &viewportInfo, &rasterizerInfo, &multisampleInfo, {}, &colorBlendInfo, nullptr, *gbufferLayout, *gbufferPass);
+	vk::PipelineDepthStencilStateCreateInfo depthStencilInfo({}, VK_TRUE, VK_TRUE, vk::CompareOp::eLess, VK_FALSE, VK_FALSE);
+
+	vk::GraphicsPipelineCreateInfo pipelineInfo({}, gbufferShaderStages, &vertexInputInfo, &inputAssemblyInfo, nullptr, &viewportInfo, &rasterizerInfo, &multisampleInfo, &depthStencilInfo, &colorBlendInfo, nullptr, *gbufferLayout, *gbufferPass);
 	vk::raii::Pipeline gbufferPipeline(device, nullptr, pipelineInfo);
 
 	// create gbuffer framebuffers
@@ -253,7 +308,8 @@ int main() {
 	std::vector<vk::raii::Framebuffer> gbufferFramebuffers;
 	gbufferFramebuffers.reserve(swapchainViews.size());
 	for (vk::raii::ImageView& imageView : swapchainViews) {
-		vk::FramebufferCreateInfo frameBufferInfo({}, *gbufferPass, *imageView, swapchainExtent.width, swapchainExtent.height, 1);
+		std::array<vk::ImageView, 2> attachments = { *imageView, *depthView };
+		vk::FramebufferCreateInfo frameBufferInfo({}, *gbufferPass, attachments, swapchainExtent.width, swapchainExtent.height, 1);
 		gbufferFramebuffers.push_back(vk::raii::Framebuffer(device, frameBufferInfo));
 	}
 
@@ -273,8 +329,8 @@ int main() {
 		std::tie(result, imageIndex) = swapchain.acquireNextImage(UINT64_MAX, *imageAcquiredSemaphore);
 
 		cmdBuf.begin({});
-		vk::ClearValue clearCol(vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f));
-		vk::RenderPassBeginInfo gbufferPassBeginInfo(*gbufferPass, *gbufferFramebuffers[imageIndex], scissor, clearCol);
+		std::array<vk::ClearValue, 2> clearCols = { vk::ClearColorValue(0.0f, 0.0f, 0.0f, 1.0f), vk::ClearDepthStencilValue(1.0f) };
+		vk::RenderPassBeginInfo gbufferPassBeginInfo(*gbufferPass, *gbufferFramebuffers[imageIndex], scissor, clearCols);
 		cmdBuf.beginRenderPass(gbufferPassBeginInfo, vk::SubpassContents::eInline);
 		cmdBuf.bindPipeline(vk::PipelineBindPoint::eGraphics, *gbufferPipeline);
 		cmdBuf.bindVertexBuffers(0, vk::Buffer(vertexBuffer), { 0 });
