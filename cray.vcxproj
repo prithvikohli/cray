@@ -144,6 +144,7 @@
     <None Include="shaders\gbuffer.vert" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="tiny_obj_loader.h" />
     <ClInclude Include="vk_mem_alloc.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
