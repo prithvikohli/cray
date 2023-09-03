@@ -99,7 +99,7 @@ int main() {
 	// create swapchain and image views
 	/////////////////////////////////////////////////////////////////////////////////////////////
 	vk::SurfaceCapabilitiesKHR surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(*surface);
-	vk::Format swapchainFormat = vk::Format::eB8G8R8A8Srgb;
+	vk::Format swapchainFormat = vk::Format::eB8G8R8A8Unorm;
 	vk::Extent2D swapchainExtent = surfaceCapabilities.currentExtent;
 	vk::SwapchainCreateInfoKHR swapchainInfo({}, *surface, surfaceCapabilities.minImageCount + 1, swapchainFormat, vk::ColorSpaceKHR::eSrgbNonlinear, swapchainExtent, 1, vk::ImageUsageFlagBits::eColorAttachment);
 	swapchainInfo.clipped = VK_TRUE;
