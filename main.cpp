@@ -1,117 +1,12 @@
-#include <vulkan/vulkan_raii.hpp>
+#include "mesh.hpp"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#define GLM_FORCE_RADIANS
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-
-#include <iostream>
 #include <fstream>
 
-#define VMA_IMPLEMENTATION
-#include "vk_mem_alloc.h"
-
-#define TINYOBJLOADER_IMPLEMENTATION
-#include "tiny_obj_loader.h"
-
-static const int WINDOW_WIDTH = 1920;
-static const int WINDOW_HEIGHT = 1080;
-
-class Allocator {
-public:
-	Allocator(VkInstance instance, VkPhysicalDevice physicalDevice, VkDevice device) {
-		VmaAllocatorCreateInfo vmaAllocatorInfo{};
-		vmaAllocatorInfo.instance = instance;
-		vmaAllocatorInfo.physicalDevice = physicalDevice;
-		vmaAllocatorInfo.device = device;
-		vmaCreateAllocator(&vmaAllocatorInfo, &m_allocator);
-	}
-	Allocator(const Allocator&) = delete;
-
-	~Allocator() { vmaDestroyAllocator(m_allocator); }
-
-	operator VmaAllocator() const { return m_allocator; }
-private:
-	VmaAllocator m_allocator;
-};
-
-class AllocatedBuffer {
-public:
-	AllocatedBuffer(VmaAllocator allocator, size_t size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage) : m_allocator(allocator) {
-		VkBufferCreateInfo bufferInfo{};
-		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufferInfo.size = size;
-		bufferInfo.usage = bufferUsage;
-
-		VmaAllocationCreateInfo vmaAllocInfo{};
-		vmaAllocInfo.usage = memoryUsage;
-		vmaCreateBuffer(m_allocator, &bufferInfo, &vmaAllocInfo, &m_buffer, &m_allocation, nullptr);
-	}
-	AllocatedBuffer(const AllocatedBuffer&) = delete;
-
-	~AllocatedBuffer() { vmaDestroyBuffer(m_allocator, m_buffer, m_allocation); }
-
-	void* map() const {
-		void* data;
-		vmaMapMemory(m_allocator, m_allocation, &data);
-		return data;
-	}
-	void unmap() const { vmaUnmapMemory(m_allocator, m_allocation); }
-
-	operator VkBuffer() const { return m_buffer; }
-private:
-	VmaAllocator m_allocator;
-	VkBuffer m_buffer;
-	VmaAllocation m_allocation;
-};
-
-class AllocatedImage {
-public:
-	AllocatedImage(VmaAllocator allocator, VkFormat format, VkExtent3D extent, VkImageUsageFlags imageUsage, VmaMemoryUsage memoryUsage) : m_allocator(allocator), m_format(format), m_extent(extent) {
-		VkImageCreateInfo imageInfo{};
-		imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-		imageInfo.imageType = VK_IMAGE_TYPE_2D;
-		imageInfo.format = m_format;
-		imageInfo.extent = m_extent;
-		imageInfo.arrayLayers = 1;
-		imageInfo.mipLevels = 1;
-		imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-		imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-		imageInfo.usage = imageUsage;
-
-		VmaAllocationCreateInfo vmaAllocInfo{};
-		vmaAllocInfo.usage = memoryUsage;
-		vmaCreateImage(m_allocator, &imageInfo, &vmaAllocInfo, &m_image, &m_allocation, nullptr);
-	}
-	AllocatedImage(const AllocatedImage&) = delete;
-
-	~AllocatedImage() { vmaDestroyImage(m_allocator, m_image, m_allocation); }
-
-	VkFormat getFormat() const { return m_format; }
-	VkExtent3D getExtent() const { return m_extent; }
-
-	operator VkImage() const { return m_image; }
-private:
-	VmaAllocator m_allocator;
-	VkImage m_image;
-	VmaAllocation m_allocation;
-
-	VkFormat m_format;
-	VkExtent3D m_extent;
-};
-
-struct Vertex {
-	glm::vec3 position;
-	glm::vec3 normal;
-};
-
-struct CameraUniforms {
-	glm::mat4 model;
-	glm::mat4 view;
-	glm::mat4 proj;
-};
+static const int WINDOW_WIDTH = 2560;
+static const int WINDOW_HEIGHT = 1440;
 
 std::vector<uint32_t> readShader(const std::string& filename) {
 	std::ifstream file(filename, std::ios::ate | std::ios::binary);
@@ -270,100 +165,56 @@ int main() {
 	vk::raii::ShaderModule gbufferVertModule(device, gbufferVertInfo);
 	vk::raii::ShaderModule gbufferFragModule(device, gbufferFragInfo);
 
-	// create camera uniforms buffer
+	// create camera
 	/////////////////////////////////////////////////////////////////////////////////////////////
-	CameraUniforms camUniforms;
-	camUniforms.model = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-	camUniforms.view = glm::lookAt(glm::vec3(0.0f, -1.0f, 0.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(-1.0f, 0.0f, 0.0f));
-	camUniforms.proj = glm::perspective(glm::radians(45.0f), swapchainExtent.width / (float)swapchainExtent.height, 0.1f, 10.0f);
-	camUniforms.proj[1][1] *= -1;
+	CameraUniforms cam;
+	cam.view = glm::lookAt(glm::vec3(5.0f, -3.5f, -10.0f), glm::vec3(0.0f, -3.5f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f));
+	cam.proj = glm::perspective(glm::radians(45.0f), swapchainExtent.width / (float)swapchainExtent.height, 0.1f, 100.0f);
+	cam.proj[1][1] *= -1;
 
-	AllocatedBuffer uniformBuffer(vmaAllocator, sizeof(CameraUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	void* uniformData = uniformBuffer.map();
-	memcpy(uniformData, &camUniforms, sizeof(CameraUniforms));
-	uniformBuffer.unmap();
-
-	// create descriptor pool and descriptor set
+	// load GLTF scene
 	/////////////////////////////////////////////////////////////////////////////////////////////
-	vk::DescriptorPoolSize descriptorPoolSize(vk::DescriptorType::eUniformBuffer, 1);
-	vk::DescriptorPoolCreateInfo descriptorPoolInfo(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, 1, descriptorPoolSize);
+	tinygltf::Model model;
+	tinygltf::TinyGLTF loader;
+	std::string warn;
+	std::string err;
+	bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, "AntiqueCamera.glb");
+	if (!warn.empty())
+		std::cerr << "[WARN] " << warn;
+	if (!err.empty())
+		std::cerr << "[ERROR] " << err;
+	if (!ret)
+		throw std::runtime_error("failed to parse GLTF file!");
+
+	// create descriptor pool and descriptor set layout
+	/////////////////////////////////////////////////////////////////////////////////////////////
+	vk::DescriptorPoolSize descriptorPoolSize(vk::DescriptorType::eUniformBuffer, model.meshes.size());
+	vk::DescriptorPoolCreateInfo descriptorPoolInfo(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, model.meshes.size(), descriptorPoolSize);
 	vk::raii::DescriptorPool descriptorPool(device, descriptorPoolInfo);
 
 	vk::DescriptorSetLayoutBinding descriptorSetLayoutBinding(0, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex);
 	vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutInfo({}, descriptorSetLayoutBinding);
 	vk::raii::DescriptorSetLayout descriptorSetLayout(device, descriptorSetLayoutInfo);
-	vk::DescriptorSetAllocateInfo descriptorSetAllocateInfo(*descriptorPool, *descriptorSetLayout);
-	vk::raii::DescriptorSets descriptorSets(device, descriptorSetAllocateInfo);
-	vk::raii::DescriptorSet descriptorSet(std::move(descriptorSets[0]));
 
-	// update descriptor set
+	// create meshes
 	/////////////////////////////////////////////////////////////////////////////////////////////
-	vk::DescriptorBufferInfo descriptorBufferInfo(vk::Buffer(uniformBuffer), 0, sizeof(CameraUniforms));
-	vk::WriteDescriptorSet writeDescriptorSet(*descriptorSet, 0, 0, vk::DescriptorType::eUniformBuffer, {}, descriptorBufferInfo);
-	device.updateDescriptorSets(writeDescriptorSet, {});
+	std::list<Mesh> meshes;
+	for (tinygltf::Node& node : model.nodes) {
+		tinygltf::Mesh m = model.meshes[node.mesh];
+		meshes.emplace_back(device, descriptorPool, descriptorSetLayout, vmaAllocator, model, m);
 
+		glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(node.scale[0], node.scale[1], node.scale[2]));
+		glm::mat4 r = glm::toMat4(glm::quat(node.rotation[0], node.rotation[1], node.rotation[2], node.rotation[3]));
+		//glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(node.translation[0], node.translation[1], node.translation[2]));
+		//cam.model = t * r * s;
+		cam.model = r * s;
+		meshes.back().update(cam);
+	}
+	
 	// create gbuffer pipeline layout
 	/////////////////////////////////////////////////////////////////////////////////////////////
 	vk::PipelineLayoutCreateInfo layoutInfo({}, *descriptorSetLayout);
 	vk::raii::PipelineLayout gbufferLayout(device, layoutInfo);
-
-	// create vertex and index buffer
-	/////////////////////////////////////////////////////////////////////////////////////////////
-	/*
-	const std::vector<Vertex> vertices = {
-		{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}},
-		{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}},
-		{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}},
-		{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}
-	};
-	const std::vector<uint16_t> indices = { 0, 1, 2, 2, 3, 0 };
-	*/
-
-	tinyobj::ObjReader objReader;
-	objReader.ParseFromFile("dragon.obj");
-	tinyobj::shape_t shape = objReader.GetShapes()[0];
-	tinyobj::attrib_t attrib = objReader.GetAttrib();
-
-	std::vector<Vertex> vertices;
-	std::vector<uint32_t> indices;
-	size_t indexOffset = 0;
-	for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
-		int fv = 3;
-		for (size_t v = 0; v < fv; v++) {
-			tinyobj::index_t idx = shape.mesh.indices[indexOffset + v];
-
-			tinyobj::real_t vx = attrib.vertices[3 * idx.vertex_index + 0];
-			tinyobj::real_t vy = attrib.vertices[3 * idx.vertex_index + 1];
-			tinyobj::real_t vz = attrib.vertices[3 * idx.vertex_index + 2];
-
-			tinyobj::real_t nx = attrib.normals[3 * idx.normal_index + 0];
-			tinyobj::real_t ny = attrib.normals[3 * idx.normal_index + 1];
-			tinyobj::real_t nz = attrib.normals[3 * idx.normal_index + 2];
-
-			Vertex vert;
-			vert.position.x = vx;
-			vert.position.y = vy;
-			vert.position.z = vz;
-
-			vert.normal.x = nx;
-			vert.normal.y = ny;
-			vert.normal.z = nz;
-
-			vertices.push_back(vert);
-			indices.push_back(indexOffset + v);
-		}
-		indexOffset += fv;
-	}
-
-	AllocatedBuffer vertexBuffer(vmaAllocator, vertices.size() * sizeof(Vertex), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	void* vertexData = vertexBuffer.map();
-	memcpy(vertexData, vertices.data(), vertices.size() * sizeof(Vertex));
-	vertexBuffer.unmap();
-
-	AllocatedBuffer indexBuffer(vmaAllocator, indices.size() * sizeof(uint32_t), VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-	void* indexData = indexBuffer.map();
-	memcpy(indexData, indices.data(), indices.size() * sizeof(uint32_t));
-	indexBuffer.unmap();
 
 	// create gbuffer pipeline
 	/////////////////////////////////////////////////////////////////////////////////////////////
@@ -374,7 +225,8 @@ int main() {
 	vk::VertexInputBindingDescription vertexBinding(0, sizeof(Vertex));
 	vk::VertexInputAttributeDescription positionAttribute(0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, position));
 	vk::VertexInputAttributeDescription normalAttribute(1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, normal));
-	std::array<vk::VertexInputAttributeDescription, 2> vertexAttributes = { positionAttribute, normalAttribute };
+	vk::VertexInputAttributeDescription texAttribute(2, 0, vk::Format::eR32G32Sfloat, offsetof(Vertex, texCoord));
+	std::array<vk::VertexInputAttributeDescription, 3> vertexAttributes = { positionAttribute, normalAttribute, texAttribute };
 	vk::PipelineVertexInputStateCreateInfo vertexInputInfo({}, vertexBinding, vertexAttributes);
 
 	vk::PipelineInputAssemblyStateCreateInfo inputAssemblyInfo({}, vk::PrimitiveTopology::eTriangleList);
@@ -427,10 +279,8 @@ int main() {
 		vk::RenderPassBeginInfo gbufferPassBeginInfo(*gbufferPass, *gbufferFramebuffers[imageIndex], scissor, clearCols);
 		cmdBuf.beginRenderPass(gbufferPassBeginInfo, vk::SubpassContents::eInline);
 		cmdBuf.bindPipeline(vk::PipelineBindPoint::eGraphics, *gbufferPipeline);
-		cmdBuf.bindVertexBuffers(0, vk::Buffer(vertexBuffer), { 0 });
-		cmdBuf.bindIndexBuffer(vk::Buffer(indexBuffer), { 0 }, vk::IndexType::eUint32);
-		cmdBuf.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *gbufferLayout, 0, *descriptorSet, {});
-		cmdBuf.drawIndexed(indices.size(), 1, 0, 0, 0);
+		for (Mesh& mesh : meshes)
+			mesh.draw(gbufferLayout, cmdBuf);
 		cmdBuf.endRenderPass();
 		cmdBuf.end();
 
