@@ -46,7 +46,7 @@
     <ClInclude Include="tiny_gltf.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="mesh.hpp">
+    <ClInclude Include="scene.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="allocations.hpp">

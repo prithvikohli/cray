@@ -8,6 +8,7 @@ public:
 		vmaAllocatorInfo.instance = instance;
 		vmaAllocatorInfo.physicalDevice = physicalDevice;
 		vmaAllocatorInfo.device = device;
+		// TODO check return value
 		vmaCreateAllocator(&vmaAllocatorInfo, &m_allocator);
 	}
 	Allocator(const Allocator&) = delete;
@@ -29,6 +30,7 @@ public:
 
 		VmaAllocationCreateInfo vmaAllocInfo{};
 		vmaAllocInfo.usage = memoryUsage;
+		// TODO check return value
 		vmaCreateBuffer(m_allocator, &bufferInfo, &vmaAllocInfo, &m_buffer, &m_allocation, nullptr);
 	}
 	AllocatedBuffer(const AllocatedBuffer&) = delete;
@@ -37,6 +39,7 @@ public:
 
 	void* map() const {
 		void* data;
+		// TODO check return value
 		vmaMapMemory(m_allocator, m_allocation, &data);
 		return data;
 	}
@@ -65,6 +68,7 @@ public:
 
 		VmaAllocationCreateInfo vmaAllocInfo{};
 		vmaAllocInfo.usage = memoryUsage;
+		// TODO check return value
 		vmaCreateImage(m_allocator, &imageInfo, &vmaAllocInfo, &m_image, &m_allocation, nullptr);
 	}
 	AllocatedImage(const AllocatedImage&) = delete;

@@ -1,4 +1,4 @@
-#include "mesh.hpp"
+#include "scene.hpp"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
@@ -8,7 +8,7 @@
 static const int WINDOW_WIDTH = 2560;
 static const int WINDOW_HEIGHT = 1440;
 
-std::vector<uint32_t> readShader(const std::string& filename) {
+static std::vector<uint32_t> readShader(const std::string& filename) {
 	std::ifstream file(filename, std::ios::ate | std::ios::binary);
 	if (!file.is_open())
 		throw std::runtime_error("failed to open file \"" + filename + "\"!");
@@ -23,10 +23,12 @@ std::vector<uint32_t> readShader(const std::string& filename) {
 int main() {
 	// initialise GLFW
 	/////////////////////////////////////////////////////////////////////////////////////////////
+	// TODO check return value
 	glfwInit();
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+	// TODO check return value
 	GLFWwindow* window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "cray", nullptr, nullptr);
 
 	// setup instance extensions and layers
@@ -47,16 +49,19 @@ int main() {
 	const uint32_t apiVersion = context.enumerateInstanceVersion();
 	vk::ApplicationInfo appInfo("cray", 1, nullptr, 0, apiVersion);
 	vk::InstanceCreateInfo instanceInfo({}, &appInfo, enabledLayers, instanceExtensions);
+	// TODO check extensions and layers supported
 	vk::raii::Instance instance(context, instanceInfo);
 
 	// create surface
 	/////////////////////////////////////////////////////////////////////////////////////////////
 	VkSurfaceKHR surf;
+	// TODO check return value
 	glfwCreateWindowSurface(*instance, window, nullptr, &surf);
 	vk::raii::SurfaceKHR surface(instance, surf);
 
 	// create physical device
 	/////////////////////////////////////////////////////////////////////////////////////////////
+	// TODO check supported GPU found
 	vk::raii::PhysicalDevices physicalDevices(instance);
 	size_t physicalDeviceIndex = 0;
 	for (size_t i = 0; i < physicalDevices.size(); i++) {
@@ -69,6 +74,7 @@ int main() {
 
 	// choose GCT queue
 	/////////////////////////////////////////////////////////////////////////////////////////////
+	// TODO check GCT queue found
 	uint32_t queueFamilyIndex = 0;
 	std::vector<vk::QueueFamilyProperties> qfps = physicalDevice.getQueueFamilyProperties();
 	for (size_t i = 0; i < qfps.size(); i++) {
@@ -83,6 +89,7 @@ int main() {
 	/////////////////////////////////////////////////////////////////////////////////////////////
 	const float queuePriority = 0.0f;
 	vk::DeviceQueueCreateInfo queueInfo({}, queueFamilyIndex, 1, &queuePriority);
+	// TODO check device extensions supported
 	std::array<const char*, 4> deviceExtensions = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME };
 	vk::DeviceCreateInfo deviceInfo({}, queueInfo, {}, deviceExtensions);
 	vk::raii::Device device(physicalDevice, deviceInfo);
@@ -99,11 +106,11 @@ int main() {
 	// create swapchain and image views
 	/////////////////////////////////////////////////////////////////////////////////////////////
 	vk::SurfaceCapabilitiesKHR surfaceCapabilities = physicalDevice.getSurfaceCapabilitiesKHR(*surface);
-	vk::Format swapchainFormat = vk::Format::eB8G8R8A8Unorm;
+	vk::Format swapchainFormat = vk::Format::eB8G8R8A8Srgb;
 	vk::Extent2D swapchainExtent = surfaceCapabilities.currentExtent;
 	vk::SwapchainCreateInfoKHR swapchainInfo({}, *surface, surfaceCapabilities.minImageCount + 1, swapchainFormat, vk::ColorSpaceKHR::eSrgbNonlinear, swapchainExtent, 1, vk::ImageUsageFlagBits::eColorAttachment);
 	swapchainInfo.clipped = VK_TRUE;
-	swapchainInfo.presentMode = vk::PresentModeKHR::eMailbox;
+	swapchainInfo.presentMode = vk::PresentModeKHR::eFifo;
 	vk::raii::SwapchainKHR swapchain(device, swapchainInfo);
 
 	std::vector<vk::Image> swapchainImages = swapchain.getImages();
@@ -180,35 +187,87 @@ int main() {
 	std::string err;
 	bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, "AntiqueCamera.glb");
 	if (!warn.empty())
-		std::cerr << "[WARN] " << warn;
+		std::cerr << "[WRN] " << warn << std::endl;
 	if (!err.empty())
-		std::cerr << "[ERROR] " << err;
+		std::cerr << "[ERR] " << err << std::endl;
 	if (!ret)
 		throw std::runtime_error("failed to parse GLTF file!");
 
+	int geometryNodeCount = 0;
+	for (tinygltf::Node& n : model.nodes) {
+		if (n.mesh > -1)
+			geometryNodeCount++;
+	}
+
 	// create descriptor pool and descriptor set layout
 	/////////////////////////////////////////////////////////////////////////////////////////////
-	vk::DescriptorPoolSize descriptorPoolSize(vk::DescriptorType::eUniformBuffer, model.meshes.size());
-	vk::DescriptorPoolCreateInfo descriptorPoolInfo(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, model.meshes.size(), descriptorPoolSize);
+	vk::DescriptorPoolSize descriptorPoolSize(vk::DescriptorType::eUniformBuffer, geometryNodeCount);
+	vk::DescriptorPoolCreateInfo descriptorPoolInfo(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet, geometryNodeCount, descriptorPoolSize);
 	vk::raii::DescriptorPool descriptorPool(device, descriptorPoolInfo);
 
 	vk::DescriptorSetLayoutBinding descriptorSetLayoutBinding(0, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eVertex);
 	vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutInfo({}, descriptorSetLayoutBinding);
 	vk::raii::DescriptorSetLayout descriptorSetLayout(device, descriptorSetLayoutInfo);
 
+	// create descriptor sets
+	/////////////////////////////////////////////////////////////////////////////////////////////
+	std::vector<std::shared_ptr<vk::raii::DescriptorSet>> descriptorSetPtrs;
+	descriptorSetPtrs.reserve(geometryNodeCount);
+	for (tinygltf::Node& node : model.nodes) {
+		vk::DescriptorSetAllocateInfo descriptorSetAllocateInfo(*descriptorPool, *descriptorSetLayout);
+		vk::raii::DescriptorSets descriptorSets(device, descriptorSetAllocateInfo);
+		descriptorSetPtrs.push_back(std::make_shared<vk::raii::DescriptorSet>(std::move(descriptorSets[0])));
+	}
+
 	// create meshes
 	/////////////////////////////////////////////////////////////////////////////////////////////
-	std::list<Mesh> meshes;
-	for (tinygltf::Node& node : model.nodes) {
-		tinygltf::Mesh m = model.meshes[node.mesh];
-		meshes.emplace_back(device, descriptorPool, descriptorSetLayout, vmaAllocator, model, m);
+	std::vector<std::shared_ptr<GltfBuffer>> gltfBuffers;
+	for (tinygltf::Buffer& buf : model.buffers)
+		gltfBuffers.push_back(std::make_shared<GltfBuffer>(vmaAllocator, buf));
+	std::vector<std::shared_ptr<GltfBufferView>> gltfBufferViews;
+	for (int i = 0; i < model.bufferViews.size(); i++)
+		gltfBufferViews.push_back(std::make_shared<GltfBufferView>(gltfBuffers[model.bufferViews[i].buffer], model.bufferViews[i]));
+	std::vector<std::shared_ptr<GltfAccessor>> gltfAccessors;
+	for (int i = 0; i < model.accessors.size(); i++)
+		gltfAccessors.push_back(std::make_shared<GltfAccessor>(gltfBufferViews[model.accessors[i].bufferView], model.accessors[i]));
 
-		glm::mat4 s = glm::scale(glm::mat4(1.0f), glm::vec3(node.scale[0], node.scale[1], node.scale[2]));
-		glm::mat4 r = glm::toMat4(glm::quat(node.rotation[0], node.rotation[1], node.rotation[2], node.rotation[3]));
-		//glm::mat4 t = glm::translate(glm::mat4(1.0f), glm::vec3(node.translation[0], node.translation[1], node.translation[2]));
-		//cam.model = t * r * s;
-		cam.model = r * s;
-		meshes.back().update(cam);
+	std::list<Mesh> meshes;
+	for (int i = 0; i < model.nodes.size(); i++) {
+		tinygltf::Node node = model.nodes[i];
+		// only geometry nodes
+		if (node.mesh == -1)
+			continue;
+		// only first primitive
+		tinygltf::Primitive primitive = model.meshes[node.mesh].primitives[0];
+		// only triangles
+		if (primitive.mode != 4)
+			continue;
+
+		// TODO other mesh properties
+		GltfAccessor& positionAccessor = *gltfAccessors[primitive.attributes.at("POSITION")];
+		GltfAccessor& normalAccessor = *gltfAccessors[primitive.attributes.at("NORMAL")];
+		GltfAccessor& texCoordAccessor = *gltfAccessors[primitive.attributes.at("TEXCOORD_0")];
+		GltfAccessor& indexAccessor = *gltfAccessors[primitive.indices];
+
+		meshes.emplace_back(vmaAllocator, positionAccessor, normalAccessor, texCoordAccessor, indexAccessor, descriptorSetPtrs[i]);
+		Mesh& m = meshes.back();
+
+		// TODO recursive transform
+		glm::mat4 t(1.0f), r(1.0f), s(1.0f);
+		if (!node.scale.empty())
+			s = glm::scale(glm::mat4(1.0f), glm::vec3(node.scale[0], node.scale[1], node.scale[2]));
+		if (!node.rotation.empty())
+			r = glm::toMat4(glm::quat(node.rotation[0], node.rotation[1], node.rotation[2], node.rotation[3]));
+		if (!node.translation.empty())
+			t = glm::translate(glm::mat4(1.0f), glm::vec3(node.translation[0], node.translation[1], node.translation[2]));
+		cam.model = t * r * s;
+		
+		m.update(cam);
+
+		// update descriptor set
+		vk::DescriptorBufferInfo descriptorBufferInfo(vk::Buffer(*m.uniformBuffer), 0, sizeof(CameraUniforms));
+		vk::WriteDescriptorSet writeDescriptorSet(**m.descriptorSet, 0, 0, vk::DescriptorType::eUniformBuffer, {}, descriptorBufferInfo);
+		device.updateDescriptorSets(writeDescriptorSet, {});
 	}
 	
 	// create gbuffer pipeline layout
@@ -222,12 +281,16 @@ int main() {
 	vk::PipelineShaderStageCreateInfo gbufferFragStage({}, vk::ShaderStageFlagBits::eFragment, *gbufferFragModule, "main");
 	std::array<vk::PipelineShaderStageCreateInfo, 2> gbufferShaderStages = { gbufferVertStage, gbufferFragStage };
 
-	vk::VertexInputBindingDescription vertexBinding(0, sizeof(Vertex));
-	vk::VertexInputAttributeDescription positionAttribute(0, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, position));
-	vk::VertexInputAttributeDescription normalAttribute(1, 0, vk::Format::eR32G32B32Sfloat, offsetof(Vertex, normal));
-	vk::VertexInputAttributeDescription texAttribute(2, 0, vk::Format::eR32G32Sfloat, offsetof(Vertex, texCoord));
+	// TODO different types from GLTF
+	vk::VertexInputBindingDescription vertexBindingPosition(0, 3 * sizeof(float));
+	vk::VertexInputBindingDescription vertexBindingNormal(1, 3 * sizeof(float));
+	vk::VertexInputBindingDescription vertexBindingTexCoord(2, 2 * sizeof(float));
+	std::array<vk::VertexInputBindingDescription, 3> vertexBindings = { vertexBindingPosition, vertexBindingNormal, vertexBindingTexCoord };
+	vk::VertexInputAttributeDescription positionAttribute(0, 0, vk::Format::eR32G32B32Sfloat, 0);
+	vk::VertexInputAttributeDescription normalAttribute(1, 1, vk::Format::eR32G32B32Sfloat, 0);
+	vk::VertexInputAttributeDescription texAttribute(2, 2, vk::Format::eR32G32Sfloat, 0);
 	std::array<vk::VertexInputAttributeDescription, 3> vertexAttributes = { positionAttribute, normalAttribute, texAttribute };
-	vk::PipelineVertexInputStateCreateInfo vertexInputInfo({}, vertexBinding, vertexAttributes);
+	vk::PipelineVertexInputStateCreateInfo vertexInputInfo({}, vertexBindings, vertexAttributes);
 
 	vk::PipelineInputAssemblyStateCreateInfo inputAssemblyInfo({}, vk::PrimitiveTopology::eTriangleList);
 
@@ -279,8 +342,13 @@ int main() {
 		vk::RenderPassBeginInfo gbufferPassBeginInfo(*gbufferPass, *gbufferFramebuffers[imageIndex], scissor, clearCols);
 		cmdBuf.beginRenderPass(gbufferPassBeginInfo, vk::SubpassContents::eInline);
 		cmdBuf.bindPipeline(vk::PipelineBindPoint::eGraphics, *gbufferPipeline);
-		for (Mesh& mesh : meshes)
-			mesh.draw(gbufferLayout, cmdBuf);
+		for (Mesh& mesh : meshes) {
+			cmdBuf.bindVertexBuffers(0, mesh.vertexBuffers, mesh.vertexBufferOffsets);
+			// TODO different types from GLTF
+			cmdBuf.bindIndexBuffer(mesh.indexBuffer, mesh.indexBufferOffset, vk::IndexType::eUint16);
+			cmdBuf.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, *gbufferLayout, 0, **mesh.descriptorSet, {});
+			cmdBuf.drawIndexed(mesh.indexCount, 1, 0, 0, 0);
+		}
 		cmdBuf.endRenderPass();
 		cmdBuf.end();
 

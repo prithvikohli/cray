@@ -146,7 +146,7 @@
   <ItemGroup>
     <ClInclude Include="allocations.hpp" />
     <ClInclude Include="json.hpp" />
-    <ClInclude Include="mesh.hpp" />
+    <ClInclude Include="scene.hpp" />
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="stb_image_write.h" />
     <ClInclude Include="tiny_gltf.h" />
