@@ -52,5 +52,8 @@
     <ClInclude Include="allocations.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="gbuffer.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

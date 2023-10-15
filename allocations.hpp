@@ -3,9 +3,11 @@
 #define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
 
-class Allocator {
+class Allocator 
+{
 public:
-    Allocator(VkInstance instance, VkPhysicalDevice physicalDevice, VkDevice device) {
+    Allocator(VkInstance instance, VkPhysicalDevice physicalDevice, VkDevice device) 
+    {
         VmaAllocatorCreateInfo vmaAllocatorInfo{};
         vmaAllocatorInfo.instance = instance;
         vmaAllocatorInfo.physicalDevice = physicalDevice;
@@ -25,9 +27,11 @@ private:
     VmaAllocator m_allocator;
 };
 
-class AllocatedBuffer {
+class AllocatedBuffer 
+{
 public:
-    AllocatedBuffer(VmaAllocator allocator, size_t size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage) : m_allocator(allocator) {
+    AllocatedBuffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage) : m_allocator(allocator) 
+    {
         VkBufferCreateInfo bufferInfo{};
         bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = size;
@@ -43,7 +47,8 @@ public:
 
     ~AllocatedBuffer() { vmaDestroyBuffer(m_allocator, m_buffer, m_allocation); }
 
-    void* map() const {
+    void* map() const 
+    {
         void* data;
         VkResult res = vmaMapMemory(m_allocator, m_allocation, &data);
         if (res != VK_SUCCESS)
@@ -60,15 +65,17 @@ private:
     VmaAllocation m_allocation;
 };
 
-class AllocatedImage {
+class AllocatedImage 
+{
 public:
-    AllocatedImage(VmaAllocator allocator, VkFormat format, VkExtent3D extent, VkImageUsageFlags imageUsage, VmaMemoryUsage memoryUsage) : m_allocator(allocator) {
+    AllocatedImage(VmaAllocator allocator, VkFormat format, VkExtent3D extent, VkImageUsageFlags imageUsage, VmaMemoryUsage memoryUsage) : m_allocator(allocator), m_format(format), m_extent(extent)
+    {
         VkImageCreateInfo imageInfo{};
         // TODO make more of these configurable
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.format = format;
-        imageInfo.extent = extent;
+        imageInfo.format = m_format;
+        imageInfo.extent = m_extent;
         imageInfo.arrayLayers = 1;
         imageInfo.mipLevels = 1;
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -85,10 +92,16 @@ public:
 
     ~AllocatedImage() { vmaDestroyImage(m_allocator, m_image, m_allocation); }
 
+    VkFormat getFormat() const { return m_format; }
+    VkExtent3D getExtent() const { return m_extent; }
+
     operator VkImage() const { return m_image; }
     AllocatedImage& operator=(const AllocatedImage&) = delete;
 private:
     VmaAllocator m_allocator;
     VkImage m_image;
     VmaAllocation m_allocation;
+
+    VkFormat m_format;
+    VkExtent3D m_extent;
 };

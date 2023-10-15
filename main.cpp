@@ -1,3 +1,4 @@
+#include "gbuffer.hpp"
 #include "scene.hpp"
 
 #define GLFW_INCLUDE_NONE
@@ -114,6 +115,35 @@ static std::vector<vk::raii::ImageView> createSwapchainViews(const vk::raii::Swa
     return swapchainViews;
 }
 
+static GBufferBundle createGBufferBundle(const vk::raii::Device& device, const AllocatedImage& depthImg, const AllocatedImage& albedoMetallicImg, const AllocatedImage& normalRoughnessImg, const AllocatedImage& emissiveImg)
+{
+    GBufferBundle gbuffer;
+    vk::ImageViewCreateInfo viewInfo;
+    viewInfo.viewType = vk::ImageViewType::e2D;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+
+    viewInfo.image = depthImg;
+    viewInfo.format = vk::Format::eD32Sfloat;
+    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
+    gbuffer.depthView = std::make_shared<vk::raii::ImageView>(device, viewInfo);
+
+    viewInfo.image = albedoMetallicImg;
+    viewInfo.format = vk::Format::eR32G32B32A32Sfloat;
+    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    gbuffer.albedoMetallicView = std::make_shared<vk::raii::ImageView>(device, viewInfo);
+
+    viewInfo.image = normalRoughnessImg;
+    gbuffer.normalRoughnessView = std::make_shared<vk::raii::ImageView>(device, viewInfo);
+
+    viewInfo.image = emissiveImg;
+    gbuffer.emissiveView = std::make_shared<vk::raii::ImageView>(device, viewInfo);
+
+    return gbuffer;
+}
+
 static std::vector<uint32_t> readShader(const std::string& filename)
 {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
@@ -125,6 +155,31 @@ static std::vector<uint32_t> readShader(const std::string& filename)
     file.read(reinterpret_cast<char*>(buffer.data()), fileSize);
     file.close();
     return buffer;
+}
+
+static GBufferPass createGBufferPass(const vk::raii::Device& device, const GBufferBundle& gbuffer)
+{
+    std::vector<uint32_t> gbufferVertCode = readShader("shaders/gbuffer.vert.spv");
+    std::vector<uint32_t> gbufferFragCode = readShader("shaders/gbuffer.frag.spv");
+
+    return GBufferPass(device, gbuffer, gbufferVertCode, gbufferFragCode);
+}
+
+static tinygltf::Model loadGltf(const std::string& filename)
+{
+    tinygltf::Model model;
+    tinygltf::TinyGLTF loader;
+    std::string warn;
+    std::string err;
+    bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, filename);
+    if (!warn.empty())
+        std::cerr << "[WRN] " << warn << std::endl;
+    if (!err.empty())
+        std::cerr << "[ERR] " << err << std::endl;
+    if (!ret)
+        throw std::runtime_error("failed to parse GLTF file!");
+
+    return model;
 }
 
 int main()
@@ -181,74 +236,38 @@ int main()
     vk::Extent2D swapchainExtent = surfaceCapabilites.currentExtent;
     vk::Format swapchainFormat = vk::Format::eB8G8R8A8Srgb;
 
-    // create depth buffer
+    // create GBuffer bundle
     /////////////////////////////////////////////////////////////////////////////////////////////
     Allocator vmaAllocator(*instance, *physicalDevice, *device);
 
-    AllocatedImage depthImage(vmaAllocator, VK_FORMAT_D32_SFLOAT, { swapchainExtent.width, swapchainExtent.height, 1 }, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    VkExtent3D ext = { swapchainExtent.width, swapchainExtent.height, 1u };
+    AllocatedImage depthImg(vmaAllocator, VK_FORMAT_D32_SFLOAT, ext, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    AllocatedImage albedoMetallicImg(vmaAllocator, VK_FORMAT_R32G32B32A32_SFLOAT, ext, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    AllocatedImage normalRoughnessImg(vmaAllocator, VK_FORMAT_R32G32B32A32_SFLOAT, ext, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    AllocatedImage emissiveImg(vmaAllocator, VK_FORMAT_R32G32B32A32_SFLOAT, ext, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
-    vk::ImageViewCreateInfo viewInfo({}, vk::Image(depthImage), vk::ImageViewType::e2D, vk::Format(depthImage.getFormat()));
-    viewInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.layerCount = 1;
-    viewInfo.subresourceRange.baseArrayLayer = 0;
-    vk::raii::ImageView depthView(device, viewInfo);
+    GBufferBundle gbufferBundle = createGBufferBundle(device, depthImg, albedoMetallicImg, normalRoughnessImg, emissiveImg);
 
-    // create gbuffer renderpass
+    // create GBuffer pass
     /////////////////////////////////////////////////////////////////////////////////////////////
-    vk::AttachmentDescription colorAttachment({}, swapchainFormat);
-    colorAttachment.loadOp = vk::AttachmentLoadOp::eClear;
-    colorAttachment.finalLayout = vk::ImageLayout::ePresentSrcKHR;
-    vk::AttachmentReference colorAttachmentRef(0, vk::ImageLayout::eColorAttachmentOptimal);
-
-    vk::AttachmentDescription depthAttachment({}, vk::Format(depthImage.getFormat()));
-    depthAttachment.loadOp = vk::AttachmentLoadOp::eClear;
-    depthAttachment.stencilLoadOp = vk::AttachmentLoadOp::eClear;
-    depthAttachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
-    depthAttachment.finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
-    vk::AttachmentReference depthAttachmentRef(1, vk::ImageLayout::eDepthStencilAttachmentOptimal);
-
-    vk::SubpassDescription subpass({}, vk::PipelineBindPoint::eGraphics, {}, colorAttachmentRef, {}, &depthAttachmentRef);
-    vk::SubpassDependency dependency(VK_SUBPASS_EXTERNAL, 0, vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eColorAttachmentOutput, {}, vk::AccessFlagBits::eColorAttachmentWrite);
-
-    std::array<vk::AttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
-    vk::RenderPassCreateInfo renderPassInfo({}, attachments, subpass, dependency);
-    vk::raii::RenderPass gbufferPass(device, renderPassInfo);
-
-    // create gbuffer shader modules
-    /////////////////////////////////////////////////////////////////////////////////////////////
-    std::vector<uint32_t> gbufferVertCode = readShader("shaders/gbuffer.vert.spv");
-    std::vector<uint32_t> gbufferFragCode = readShader("shaders/gbuffer.frag.spv");
-
-    vk::ShaderModuleCreateInfo gbufferVertInfo({}, gbufferVertCode);
-    vk::ShaderModuleCreateInfo gbufferFragInfo({}, gbufferFragCode);
-    vk::raii::ShaderModule gbufferVertModule(device, gbufferVertInfo);
-    vk::raii::ShaderModule gbufferFragModule(device, gbufferFragInfo);
+    GBufferPass gbufferPass = createGBufferPass(device, gbufferBundle);
 
     // create camera
     /////////////////////////////////////////////////////////////////////////////////////////////
+    // TODO make configurable
     CameraUniforms cam;
     cam.view = glm::lookAt(glm::vec3(5.0f, -3.5f, -10.0f), glm::vec3(0.0f, -3.5f, 0.0f), glm::vec3(0.0f, -1.0f, 0.0f));
     cam.proj = glm::perspective(glm::radians(45.0f), swapchainExtent.width / (float)swapchainExtent.height, 0.1f, 100.0f);
     cam.proj[1][1] *= -1;
 
-    // load GLTF scene
+    // load GLTF
     /////////////////////////////////////////////////////////////////////////////////////////////
-    tinygltf::Model model;
-    tinygltf::TinyGLTF loader;
-    std::string warn;
-    std::string err;
-    bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, "AntiqueCamera.glb");
-    if (!warn.empty())
-        std::cerr << "[WRN] " << warn << std::endl;
-    if (!err.empty())
-        std::cerr << "[ERR] " << err << std::endl;
-    if (!ret)
-        throw std::runtime_error("failed to parse GLTF file!");
+    // TODO make configurable
+    tinygltf::Model gltfModel = loadGltf("AntiqueCamera.glb");
 
     int geometryNodeCount = 0;
-    for (tinygltf::Node& n : model.nodes) {
+    for (const tinygltf::Node& n : gltfModel.nodes)
+    {
         if (n.mesh > -1)
             geometryNodeCount++;
     }
@@ -265,13 +284,7 @@ int main()
 
     // create descriptor sets
     /////////////////////////////////////////////////////////////////////////////////////////////
-    std::vector<std::shared_ptr<vk::raii::DescriptorSet>> descriptorSetPtrs;
-    descriptorSetPtrs.reserve(geometryNodeCount);
-    for (tinygltf::Node& node : model.nodes) {
-        vk::DescriptorSetAllocateInfo descriptorSetAllocateInfo(*descriptorPool, *descriptorSetLayout);
-        vk::raii::DescriptorSets descriptorSets(device, descriptorSetAllocateInfo);
-        descriptorSetPtrs.push_back(std::make_shared<vk::raii::DescriptorSet>(std::move(descriptorSets[0])));
-    }
+
 
     // create meshes
     /////////////////////////////////////////////////////////////////////////////////////////////
