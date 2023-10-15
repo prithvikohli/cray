@@ -1,3 +1,5 @@
+#pragma once
+
 #include <vulkan/vulkan_raii.hpp>
 
 #define TINYGLTF_IMPLEMENTATION
@@ -15,88 +17,88 @@
 #include <iostream>
 
 struct CameraUniforms {
-	glm::mat4 model;
-	glm::mat4 view;
-	glm::mat4 proj;
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
 };
 
 struct GltfBuffer {
-	std::unique_ptr<AllocatedBuffer> allocatedBuffer;
-	size_t byteLength;
+    std::unique_ptr<AllocatedBuffer> allocatedBuffer;
+    size_t byteLength;
 
-	GltfBuffer(VmaAllocator allocator, tinygltf::Buffer& buf) {
-		byteLength = buf.data.size();
-		// TODO different buffer usages
-		// TODO different memory usages
-		allocatedBuffer = std::make_unique<AllocatedBuffer>(allocator, byteLength, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-		void* data = allocatedBuffer->map();
-		memcpy(data, buf.data.data(), byteLength);
-		allocatedBuffer->unmap();
-	}
+    GltfBuffer(VmaAllocator allocator, tinygltf::Buffer& buf) {
+        byteLength = buf.data.size();
+        // TODO different buffer usages
+        // TODO different memory usages
+        allocatedBuffer = std::make_unique<AllocatedBuffer>(allocator, byteLength, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        void* data = allocatedBuffer->map();
+        memcpy(data, buf.data.data(), byteLength);
+        allocatedBuffer->unmap();
+    }
 };
 
 struct GltfBufferView {
-	std::shared_ptr<GltfBuffer> buffer;
-	size_t byteLength;
-	size_t byteOffset;
-	// TODO other properties
+    std::shared_ptr<GltfBuffer> buffer;
+    size_t byteLength;
+    size_t byteOffset;
+    // TODO other properties
 
-	GltfBufferView(std::shared_ptr<GltfBuffer> buf, tinygltf::BufferView& bufView) : buffer(buf), byteLength(bufView.byteLength), byteOffset(bufView.byteOffset) {};
+    GltfBufferView(std::shared_ptr<GltfBuffer> buf, tinygltf::BufferView& bufView) : buffer(buf), byteLength(bufView.byteLength), byteOffset(bufView.byteOffset) {};
 };
 
 struct GltfAccessor {
-	std::shared_ptr<GltfBufferView> bufferView;
-	size_t byteOffset;
-	size_t count;
-	// TODO other properties
+    std::shared_ptr<GltfBufferView> bufferView;
+    size_t byteOffset;
+    size_t count;
+    // TODO other properties
 
-	GltfAccessor(std::shared_ptr<GltfBufferView> bufView, tinygltf::Accessor& accessor) : bufferView(bufView), byteOffset(accessor.byteOffset), count(accessor.count) {};
+    GltfAccessor(std::shared_ptr<GltfBufferView> bufView, tinygltf::Accessor& accessor) : bufferView(bufView), byteOffset(accessor.byteOffset), count(accessor.count) {};
 };
 
 struct Mesh {
-	std::vector<vk::Buffer> vertexBuffers;
-	std::vector<vk::DeviceSize> vertexBufferOffsets;
+    std::vector<vk::Buffer> vertexBuffers;
+    std::vector<vk::DeviceSize> vertexBufferOffsets;
 
-	vk::Buffer indexBuffer;
-	vk::DeviceSize indexBufferOffset;
-	
-	std::unique_ptr<AllocatedBuffer> uniformBuffer;
+    vk::Buffer indexBuffer;
+    vk::DeviceSize indexBufferOffset;
+    
+    std::unique_ptr<AllocatedBuffer> uniformBuffer;
 
-	std::shared_ptr<vk::raii::DescriptorSet> descriptorSet;
+    std::shared_ptr<vk::raii::DescriptorSet> descriptorSet;
 
-	uint32_t indexCount;
+    uint32_t indexCount;
 
-	Mesh(VmaAllocator allocator, GltfAccessor& positionAccessor, GltfAccessor& normalAccessor, GltfAccessor& texCoordAccessor, GltfAccessor& indexAccessor, std::shared_ptr<vk::raii::DescriptorSet> descriptorSet) : descriptorSet(descriptorSet) {
-		// TODO other properties
-		vk::Buffer positionBuffer(*positionAccessor.bufferView->buffer->allocatedBuffer);
-		vk::Buffer normalBuffer(*normalAccessor.bufferView->buffer->allocatedBuffer);
-		vk::Buffer texCoordBuffer(*texCoordAccessor.bufferView->buffer->allocatedBuffer);
+    Mesh(VmaAllocator allocator, GltfAccessor& positionAccessor, GltfAccessor& normalAccessor, GltfAccessor& texCoordAccessor, GltfAccessor& indexAccessor, std::shared_ptr<vk::raii::DescriptorSet> descriptorSet) : descriptorSet(descriptorSet) {
+        // TODO other properties
+        vk::Buffer positionBuffer(*positionAccessor.bufferView->buffer->allocatedBuffer);
+        vk::Buffer normalBuffer(*normalAccessor.bufferView->buffer->allocatedBuffer);
+        vk::Buffer texCoordBuffer(*texCoordAccessor.bufferView->buffer->allocatedBuffer);
 
-		vertexBuffers.push_back(positionBuffer);
-		vertexBuffers.push_back(normalBuffer);
-		vertexBuffers.push_back(texCoordBuffer);
+        vertexBuffers.push_back(positionBuffer);
+        vertexBuffers.push_back(normalBuffer);
+        vertexBuffers.push_back(texCoordBuffer);
 
-		vk::DeviceSize positionOffset = static_cast<vk::DeviceSize>(positionAccessor.byteOffset + positionAccessor.bufferView->byteOffset);
-		vk::DeviceSize normalOffset = static_cast<vk::DeviceSize>(normalAccessor.byteOffset + normalAccessor.bufferView->byteOffset);
-		vk::DeviceSize texCoordOffset = static_cast<vk::DeviceSize>(texCoordAccessor.byteOffset + texCoordAccessor.bufferView->byteOffset);
+        vk::DeviceSize positionOffset = static_cast<vk::DeviceSize>(positionAccessor.byteOffset + positionAccessor.bufferView->byteOffset);
+        vk::DeviceSize normalOffset = static_cast<vk::DeviceSize>(normalAccessor.byteOffset + normalAccessor.bufferView->byteOffset);
+        vk::DeviceSize texCoordOffset = static_cast<vk::DeviceSize>(texCoordAccessor.byteOffset + texCoordAccessor.bufferView->byteOffset);
 
-		vertexBufferOffsets.push_back(positionOffset);
-		vertexBufferOffsets.push_back(normalOffset);
-		vertexBufferOffsets.push_back(texCoordOffset);
+        vertexBufferOffsets.push_back(positionOffset);
+        vertexBufferOffsets.push_back(normalOffset);
+        vertexBufferOffsets.push_back(texCoordOffset);
 
-		indexBuffer = *indexAccessor.bufferView->buffer->allocatedBuffer;
-		indexBufferOffset = static_cast<vk::DeviceSize>(indexAccessor.byteOffset + indexAccessor.bufferView->byteOffset);
+        indexBuffer = *indexAccessor.bufferView->buffer->allocatedBuffer;
+        indexBufferOffset = static_cast<vk::DeviceSize>(indexAccessor.byteOffset + indexAccessor.bufferView->byteOffset);
 
-		uniformBuffer = std::make_unique<AllocatedBuffer>(allocator, sizeof(CameraUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        uniformBuffer = std::make_unique<AllocatedBuffer>(allocator, sizeof(CameraUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-		indexCount = indexAccessor.count;
-	}
+        indexCount = indexAccessor.count;
+    }
 
-	void update(CameraUniforms camUniforms) {
-		void* data = uniformBuffer->map();
-		memcpy(data, &camUniforms, sizeof(CameraUniforms));
-		uniformBuffer->unmap();
-	}
+    void update(CameraUniforms camUniforms) {
+        void* data = uniformBuffer->map();
+        memcpy(data, &camUniforms, sizeof(CameraUniforms));
+        uniformBuffer->unmap();
+    }
 };
 
 //class Mesh {
