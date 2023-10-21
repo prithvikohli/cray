@@ -182,6 +182,19 @@ static tinygltf::Model loadGltf(const std::string& filename)
     return model;
 }
 
+static std::vector<std::shared_ptr<vk::raii::DescriptorSet>> createDescriptorSets(uint32_t count, const vk::raii::Device& device, const vk::raii::DescriptorPool& descriptorPool, const vk::raii::DescriptorSetLayout& descriptorSetLayout)
+{
+    std::vector<std::shared_ptr<vk::raii::DescriptorSet>> descriptorSetPtrs;
+    descriptorSetPtrs.reserve(count);
+    for (uint32_t i = 0u; i < count; i++) 
+    {
+        vk::DescriptorSetAllocateInfo descriptorSetAllocateInfo(*descriptorPool, *descriptorSetLayout);
+        vk::raii::DescriptorSets descriptorSets(device, descriptorSetAllocateInfo);
+        descriptorSetPtrs.push_back(std::make_shared<vk::raii::DescriptorSet>(std::move(descriptorSets[0])));
+    }
+    return descriptorSetPtrs;
+}
+
 int main()
 {
     // initialise GLFW and create window
@@ -284,7 +297,7 @@ int main()
 
     // create descriptor sets
     /////////////////////////////////////////////////////////////////////////////////////////////
-
+    std::vector<std::shared_ptr<vk::raii::DescriptorSet>> descriptorSets = createDescriptorSets(geometryNodeCount, device, descriptorPool, descriptorSetLayout);
 
     // create meshes
     /////////////////////////////////////////////////////////////////////////////////////////////
