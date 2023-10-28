@@ -137,6 +137,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="gbuffer.cpp" />
     <ClCompile Include="vk_graphics.cpp" />
     <ClCompile Include="_main.cpp" />
   </ItemGroup>
@@ -147,6 +148,7 @@
   <ItemGroup>
     <ClInclude Include="allocations.hpp" />
     <ClInclude Include="gbuffer.hpp" />
+    <ClInclude Include="_gbuffer.hpp" />
     <ClInclude Include="json.hpp" />
     <ClInclude Include="vk_graphics.hpp" />
     <ClInclude Include="scene.hpp" />

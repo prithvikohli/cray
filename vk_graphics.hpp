@@ -9,6 +9,8 @@
 #include <vector>
 #include <exception>
 
+#include "vk_mem_alloc.h"
+
 #define LOG(msg) std::cout << msg << std::endl
 #define VK_CHECK(func, err) if (func != VK_SUCCESS) throw std::runtime_error(err)
 
@@ -23,11 +25,13 @@ public:
 
     ~RenderContext();
 
+    VkDevice getDevice() const { return m_device; }
+
     RenderContext& operator=(const RenderContext&) = delete;
 
-private:
     VkExtent2D m_extent;
 
+private:
     VkInstance m_instance;
     VkSurfaceKHR m_surface;
     VkPhysicalDevice m_physicalDevice;
@@ -38,6 +42,7 @@ private:
     VkCommandBuffer m_cmdBuf;
     VkSwapchainKHR m_swapchain;
     std::vector<VkImageView> m_swapchainViews;
+    VmaAllocator m_allocator;
 
     void createInstance();
     void createSurface(GLFWwindow* window);
@@ -47,6 +52,20 @@ private:
     void createCommandBuffer();
     void createSwapchain();
     void createSwapchainViews();
+};
+
+class Buffer
+{
+public:
+    Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage);
+    Buffer(const Buffer&) = delete;
+
+    ~Buffer();
+
+    Buffer& operator=(const Buffer&) = delete;
+
+private:
+    VkBuffer m_handle;
 };
 
 }

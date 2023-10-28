@@ -24,6 +24,9 @@
     <ClCompile Include="vk_graphics.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="gbuffer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="shaders\gbuffer.frag">
@@ -55,10 +58,13 @@
     <ClInclude Include="allocations.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="gbuffer.hpp">
+    <ClInclude Include="_gbuffer.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="vk_graphics.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="gbuffer.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

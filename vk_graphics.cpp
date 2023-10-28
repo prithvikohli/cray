@@ -2,14 +2,14 @@
 
 #ifndef NDEBUG
 #define ENABLED_LAYER_COUNT 1u
-static const char* ENABLED_LAYER_NAMES[ENABLED_LAYER_COUNT] = { "VK_LAYER_KHRONOS_validation" };
+static const char* ENABLED_LAYER_NAMES[] = { "VK_LAYER_KHRONOS_validation" };
 #else
 #define ENABLED_LAYER_COUNT 0u
 static const chair** ENABLED_LAYER_NAMES = nullptr;
 #endif
 
 #define ENABLED_DEVICE_EXTENSION_COUNT 4u
-static const char* ENABLED_DEVICE_EXTENSION_NAMES[ENABLED_DEVICE_EXTENSION_COUNT] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME };
+static const char* ENABLED_DEVICE_EXTENSION_NAMES[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME };
 
 namespace vk
 {
@@ -24,6 +24,13 @@ RenderContext::RenderContext(GLFWwindow* window)
     createCommandBuffer();
     createSwapchain();
     createSwapchainViews();
+
+    VmaAllocatorCreateInfo allocatorInfo{};
+    allocatorInfo.device = m_device;
+    allocatorInfo.physicalDevice = m_physicalDevice;
+    allocatorInfo.instance = m_instance;
+
+    VK_CHECK(vmaCreateAllocator(&allocatorInfo, &m_allocator), "failed to create VMA allocator!");
 }
 
 RenderContext::~RenderContext()
@@ -208,5 +215,20 @@ void RenderContext::createSwapchainViews()
         m_swapchainViews.push_back(view);
     }
 }
+
+Buffer::Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage)
+{
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = bufferUsage;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+}
+
+Buffer::~Buffer
 
 }

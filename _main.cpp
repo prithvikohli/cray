@@ -1,5 +1,5 @@
-#include "gbuffer.hpp"
-#include "scene.hpp"
+#include "_gbuffer.hpp"
+#include "_scene.hpp"
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
