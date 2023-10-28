@@ -52,10 +52,10 @@
     <ClInclude Include="tiny_gltf.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="scene.hpp">
+    <ClInclude Include="_scene.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="allocations.hpp">
+    <ClInclude Include="_allocations.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="_gbuffer.hpp">

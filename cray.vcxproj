@@ -146,12 +146,12 @@
     <None Include="shaders\gbuffer.vert" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="allocations.hpp" />
+    <ClInclude Include="_allocations.hpp" />
     <ClInclude Include="gbuffer.hpp" />
     <ClInclude Include="_gbuffer.hpp" />
     <ClInclude Include="json.hpp" />
     <ClInclude Include="vk_graphics.hpp" />
-    <ClInclude Include="scene.hpp" />
+    <ClInclude Include="_scene.hpp" />
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="stb_image_write.h" />
     <ClInclude Include="tiny_gltf.h" />
