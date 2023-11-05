@@ -1,0 +1,15 @@
+#version 460
+
+#extension GL_KHR_vulkan_glsl : enable
+
+#define WINDOW_WIDTH 2560
+#define WINDOW_HEIGHT 1440
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba8) uniform image2D img;
+
+void main()
+{
+    imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(float(gl_GlobalInvocationID.x) / WINDOW_WIDTH, float(gl_GlobalInvocationID.y) / WINDOW_HEIGHT, 0.0, 0.0));
+}

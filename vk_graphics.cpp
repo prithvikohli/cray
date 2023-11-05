@@ -1,4 +1,7 @@
-#include "vk_graphics.hpp"
+#define VMA_IMPLEMENTATION
+#include "vk_mem_alloc.h"
+
+#include "vk_graphics.h"
 
 #ifndef NDEBUG
 #define ENABLED_LAYER_COUNT 1u
@@ -46,12 +49,9 @@ RenderContext::~RenderContext()
 
 void RenderContext::createInstance()
 {
-    uint32_t apiVersion;
-    VK_CHECK(vkEnumerateInstanceVersion(&apiVersion), "failed to get Vulkan API version!");
-
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    appInfo.apiVersion = apiVersion;
+    appInfo.apiVersion = VK_MAKE_API_VERSION(1, 2, 0, 0);
     appInfo.applicationVersion = 0u;
     appInfo.pApplicationName = "cray";
 
@@ -81,7 +81,7 @@ void RenderContext::getPhysicalDevice()
     uint32_t physicalDeviceCount;
     VK_CHECK(vkEnumeratePhysicalDevices(m_instance, &physicalDeviceCount, nullptr), "failed to enumerate physical devices!");
     std::vector<VkPhysicalDevice> physicalDevices(physicalDeviceCount);
-    vkEnumeratePhysicalDevices(m_instance, nullptr, physicalDevices.data());
+    vkEnumeratePhysicalDevices(m_instance, &physicalDeviceCount, physicalDevices.data());
 
     int physicalDeviceIdx = -1;
     for (uint32_t i = 0; i < physicalDeviceCount; i++)
@@ -107,7 +107,7 @@ void RenderContext::chooseGctPresentQueue()
     uint32_t queueFamilyCount;
     vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &queueFamilyCount, nullptr);
     std::vector<VkQueueFamilyProperties> queueFamilyProps(queueFamilyCount);
-    vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, nullptr, queueFamilyProps.data());
+    vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &queueFamilyCount, queueFamilyProps.data());
 
     for (uint32_t i = 0; i < queueFamilyCount; i++)
     {
@@ -190,11 +190,11 @@ void RenderContext::createSwapchainViews()
 {
     uint32_t swapchainImageCount;
     VK_CHECK(vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageCount, nullptr), "failed to get swapchain images!");
-    std::vector<VkImage> swapchainImages(swapchainImageCount);
-    vkGetSwapchainImagesKHR(m_device, m_swapchain, nullptr, swapchainImages.data());
+    m_swapchainImages.resize(swapchainImageCount);
+    vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageCount, m_swapchainImages.data());
 
     m_swapchainViews.reserve(swapchainImageCount);
-    for (VkImage img : swapchainImages)
+    for (VkImage img : m_swapchainImages)
     {
         VkImageSubresourceRange subRange{};
         subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -216,19 +216,134 @@ void RenderContext::createSwapchainViews()
     }
 }
 
-Buffer::Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage)
+void RenderContext::acquireNextSwapchainImage(uint32_t* idx, VkSemaphore semaphore) const
+{
+    VK_CHECK(vkAcquireNextImageKHR(m_device, m_swapchain, UINT64_MAX, semaphore, VK_NULL_HANDLE, idx), "failed to acquire swapchain image!");
+}
+
+void RenderContext::submitToQueue(VkSubmitInfo submitInfo, VkFence fence) const
+{
+    VK_CHECK(vkQueueSubmit(m_queue, 1u, &submitInfo, fence), "failed to submit to queue!");
+}
+
+void RenderContext::present(uint32_t swapIdx, VkSemaphore semaphore) const
+{
+    VkPresentInfoKHR presentInfo{};
+    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    presentInfo.waitSemaphoreCount = 1u;
+    presentInfo.pWaitSemaphores = &semaphore;
+    presentInfo.swapchainCount = 1u;
+    presentInfo.pSwapchains = &m_swapchain;
+    presentInfo.pImageIndices = &swapIdx;
+
+    VK_CHECK(vkQueuePresentKHR(m_queue, &presentInfo), "failed to present swapchain!");
+}
+
+Buffer::Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) : m_allocator(allocator), m_size(size)
 {
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = size;
+    bufferInfo.size = m_size;
     bufferInfo.usage = bufferUsage;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+    allocInfo.usage = memoryUsage;
+    allocInfo.flags = allocFlags;
+    allocInfo.requiredFlags = memoryFlags;
 
+    VK_CHECK(vmaCreateBuffer(m_allocator, &bufferInfo, &allocInfo, &m_handle, &m_allocation, nullptr), "failed to create VMA buffer!");
 }
 
-Buffer::~Buffer
+Buffer::~Buffer()
+{
+    vmaDestroyBuffer(m_allocator, m_handle, m_allocation);
+}
+
+void* Buffer::map() const
+{
+    void* data;
+    VK_CHECK(vmaMapMemory(m_allocator, m_allocation, &data), "failed to map VMA buffer!");
+    return data;
+}
+
+void Buffer::unmap() const
+{
+    vmaUnmapMemory(m_allocator, m_allocation);
+}
+
+VkBuffer Buffer::getHandle() const
+{
+    return m_handle;
+}
+
+Buffer::operator VkBuffer() const
+{
+    return m_handle;
+}
+
+Image::Image(VmaAllocator allocator, VkImageCreateInfo imageInfo, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) : m_allocator(allocator), m_imageInfo(imageInfo)
+{
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = memoryUsage;
+    allocInfo.flags = allocFlags;
+    allocInfo.requiredFlags = memoryFlags;
+
+    VK_CHECK(vmaCreateImage(m_allocator, &m_imageInfo, &allocInfo, &m_handle, &m_allocation, nullptr), "failed to create VMA image!");
+}
+
+Image::~Image()
+{
+    vmaDestroyImage(m_allocator, m_handle, m_allocation);
+}
+
+void* Image::map() const
+{
+    void* data;
+    VK_CHECK(vmaMapMemory(m_allocator, m_allocation, &data), "failed to map VMA image!");
+    return data;
+}
+
+void Image::unmap() const
+{
+    vmaUnmapMemory(m_allocator, m_allocation);
+}
+
+VkImage Image::getHandle() const
+{
+    return m_handle;
+}
+
+Image::operator VkImage() const
+{
+    return m_handle;
+}
+
+ImageView::ImageView(VkDevice device, const vk::Image& image, VkImageViewType viewType, VkImageSubresourceRange subRange) : m_device(device)
+{
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = image;
+    viewInfo.viewType = viewType;
+    viewInfo.format = image.m_imageInfo.format;
+    viewInfo.subresourceRange = subRange;
+
+    VK_CHECK(vkCreateImageView(m_device, &viewInfo, nullptr, &m_handle), "failed to create image view!");
+}
+
+ImageView::~ImageView()
+{
+    vkDestroyImageView(m_device, m_handle, nullptr);
+}
+
+VkImageView ImageView::getHandle() const
+{
+    return m_handle;
+}
+
+ImageView::operator VkImageView() const
+{
+    return m_handle;
+}
 
 }

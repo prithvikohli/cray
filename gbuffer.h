@@ -1,6 +1,14 @@
 #pragma once
 
-#include "vk_graphics.hpp"
+#include "vk_graphics.h"
+
+struct GBufferBundle
+{
+    std::shared_ptr<vk::ImageView> depth;
+    std::shared_ptr<vk::ImageView> albedoMetallic;
+    std::shared_ptr<vk::ImageView> normalRoughness;
+    std::shared_ptr<vk::ImageView> emissive;
+};
 
 class GBufferPass
 {
@@ -9,6 +17,10 @@ public:
     GBufferPass(const GBufferPass&) = delete;
 
     ~GBufferPass();
+
+    void bindBundle(GBufferBundle bundle);
+    void begin(VkCommandBuffer cmdBuf) const;
+    void end(VkCommandBuffer cmdBuf) const;
 
     GBufferPass& operator=(const GBufferPass&) = delete;
 
@@ -22,6 +34,8 @@ private:
     VkPipeline m_pipeline;
 
     VkExtent2D m_extent;
+
+    VkFramebuffer m_framebuffer = VK_NULL_HANDLE;
 
     void createRenderPass();
     void createLayouts();

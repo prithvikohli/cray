@@ -18,13 +18,19 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="_main.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="vk_graphics.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="gbuffer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="lighting.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="renderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -33,6 +39,9 @@
       <Filter>Source Files\shaders</Filter>
     </None>
     <None Include="shaders\gbuffer.vert">
+      <Filter>Source Files\shaders</Filter>
+    </None>
+    <None Include="shaders\lighting.comp">
       <Filter>Source Files\shaders</Filter>
     </None>
   </ItemGroup>
@@ -52,19 +61,16 @@
     <ClInclude Include="tiny_gltf.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="_scene.hpp">
+    <ClInclude Include="vk_graphics.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="_allocations.hpp">
+    <ClInclude Include="gbuffer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="_gbuffer.hpp">
+    <ClInclude Include="lighting.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="vk_graphics.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="gbuffer.hpp">
+    <ClInclude Include="renderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

@@ -1,4 +1,4 @@
-#include "gbuffer.hpp"
+#include "gbuffer.h"
 
 GBufferPass::GBufferPass(vk::RenderContext* rc, const std::vector<uint32_t>& vertCode, const std::vector<uint32_t>& fragCode) : m_device(rc->getDevice()), m_extent(rc->m_extent)
 {
@@ -16,6 +16,8 @@ GBufferPass::~GBufferPass()
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
     vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
     vkDestroyRenderPass(m_device, m_renderPass, nullptr);
+    if (m_framebuffer != VK_NULL_HANDLE)
+        vkDestroyFramebuffer(m_device, m_framebuffer, nullptr);
 }
 
 void GBufferPass::createRenderPass()
@@ -231,4 +233,61 @@ void GBufferPass::createPipeline()
     pipelineInfo.subpass = 0u;
 
     VK_CHECK(vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1u, &pipelineInfo, nullptr, &m_pipeline), "failed to create GBuffer pass pipeline!");
+}
+
+void GBufferPass::bindBundle(GBufferBundle bundle)
+{
+    if (m_framebuffer != VK_NULL_HANDLE)
+        vkDestroyFramebuffer(m_device, m_framebuffer, nullptr);
+
+    VkImageView attachments[] = { *bundle.depth, *bundle.albedoMetallic, *bundle.normalRoughness, *bundle.emissive };
+
+    VkFramebufferCreateInfo framebufferInfo{};
+    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    framebufferInfo.renderPass = m_renderPass;
+    framebufferInfo.attachmentCount = 4u;
+    framebufferInfo.pAttachments = attachments;
+    framebufferInfo.width = m_extent.width;
+    framebufferInfo.height = m_extent.height;
+    framebufferInfo.layers = 1u;
+
+    VK_CHECK(vkCreateFramebuffer(m_device, &framebufferInfo, nullptr, &m_framebuffer), "failed to create GBuffer pass framebuffer from bound GBuffer bundle!");
+}
+
+void GBufferPass::begin(VkCommandBuffer cmdBuf) const
+{
+    VkRect2D scissor;
+    scissor.offset = { 0, 0 };
+    scissor.extent = m_extent;
+    
+    VkClearDepthStencilValue clearDepth{};
+    clearDepth.depth = 1.0f;
+
+    VkClearColorValue clearCol{};
+    clearCol.float32[0] = 0.0f;
+    clearCol.float32[1] = 0.0f;
+    clearCol.float32[2] = 0.0f;
+    clearCol.float32[3] = 0.0f;
+
+    VkClearValue clearValues[4];
+    clearValues[0].depthStencil = clearDepth;
+    clearValues[1].color = clearCol;
+    clearValues[2].color = clearCol;
+    clearValues[3].color = clearCol;
+
+    VkRenderPassBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    beginInfo.renderPass = m_renderPass;
+    beginInfo.framebuffer = m_framebuffer;
+    beginInfo.renderArea = scissor;
+    beginInfo.clearValueCount = 4u;
+    beginInfo.pClearValues = clearValues;
+
+    vkCmdBeginRenderPass(cmdBuf, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
+}
+
+void GBufferPass::end(VkCommandBuffer cmdBuf) const
+{
+    vkCmdEndRenderPass(cmdBuf);
 }

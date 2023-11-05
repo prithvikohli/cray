@@ -138,20 +138,22 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="gbuffer.cpp" />
+    <ClCompile Include="lighting.cpp" />
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="renderer.cpp" />
     <ClCompile Include="vk_graphics.cpp" />
-    <ClCompile Include="_main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="shaders\gbuffer.frag" />
     <None Include="shaders\gbuffer.vert" />
+    <None Include="shaders\lighting.comp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="_allocations.hpp" />
-    <ClInclude Include="gbuffer.hpp" />
-    <ClInclude Include="_gbuffer.hpp" />
+    <ClInclude Include="lighting.h" />
+    <ClInclude Include="renderer.h" />
+    <ClInclude Include="gbuffer.h" />
     <ClInclude Include="json.hpp" />
-    <ClInclude Include="vk_graphics.hpp" />
-    <ClInclude Include="_scene.hpp" />
+    <ClInclude Include="vk_graphics.h" />
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="stb_image_write.h" />
     <ClInclude Include="tiny_gltf.h" />

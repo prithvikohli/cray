@@ -2,7 +2,7 @@
 
 #include <vulkan/vulkan_raii.hpp>
 
-#include "allocations.hpp"
+#include "_allocations.hpp"
 
 struct GBufferBundle
 {
