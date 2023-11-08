@@ -2,13 +2,37 @@
 
 #include <fstream>
 
-Renderer::Renderer(vk::RenderContext* rc, const std::string& shadersDir) : m_rc(rc), m_device(rc->getDevice()), m_cmdBuf(rc->getCommandBuffer()), m_swapchainImages(rc->getSwapchainImages()), m_swapchainViews(rc->getSwapchainImageViews()), m_extent(rc->m_extent)
+Renderer::Renderer(vk::RenderContext* rc, const std::string& shadersDir) : m_rc(rc), m_device(rc->getDevice()), m_cmdBuf(rc->getCommandBuffer())
 {
     std::vector<uint32_t> lightingCode = readShader(shadersDir + "lighting.comp.spv");
     m_lightingPass = std::make_unique<LightingPass>(m_rc, lightingCode);
 
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    imageInfo.extent = { m_rc->m_extent.width, m_rc->m_extent.height, 1u };
+    imageInfo.mipLevels = 1u;
+    imageInfo.arrayLayers = 1u;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    m_lightingImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+
+    VkImageSubresourceRange subRange{};
+    subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    subRange.baseArrayLayer = 0u;
+    subRange.baseMipLevel = 0u;
+    subRange.layerCount = 1u;
+    subRange.levelCount = 1u;
+
+    m_lightingView = m_rc->createImageView(*m_lightingImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
+
     createSyncObjects();
-    createDescriptorSets();
+    createDescriptorSet();
 }
 
 Renderer::~Renderer()
@@ -32,46 +56,40 @@ void Renderer::createSyncObjects()
     VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlightFence), "failed to create renderer in flight fence!");
 }
 
-void Renderer::createDescriptorSets()
+void Renderer::createDescriptorSet()
 {
     VkDescriptorPoolSize poolSize{};
-    poolSize.descriptorCount = m_swapchainViews.size();
+    poolSize.descriptorCount = 1u;
     poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.maxSets = m_swapchainViews.size();
+    poolInfo.maxSets = 1u;
     poolInfo.poolSizeCount = 1u;
     poolInfo.pPoolSizes = &poolSize;
 
     VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool), "failed to create renderer descriptor pool!");
 
-    for (VkImageView view : m_swapchainViews)
-    {
-        VkDescriptorSetLayout layout = m_lightingPass->getDescriptorSetLayout();
+    VkDescriptorSetLayout layout = m_lightingPass->getDescriptorSetLayout();
+    VkDescriptorSetAllocateInfo setAllocInfo{};
+    setAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    setAllocInfo.descriptorPool = m_descriptorPool;
+    setAllocInfo.descriptorSetCount = 1u;
+    setAllocInfo.pSetLayouts = &layout;
 
-        VkDescriptorSetAllocateInfo setAllocInfo{};
-        setAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        setAllocInfo.descriptorPool = m_descriptorPool;
-        setAllocInfo.descriptorSetCount = 1u;
-        setAllocInfo.pSetLayouts = &layout;
-        VkDescriptorSet set;
-        VK_CHECK(vkAllocateDescriptorSets(m_device, &setAllocInfo, &set), "failed to allocate renderer descriptor set!");
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &setAllocInfo, &m_descriptorSet), "failed to allocate renderer descriptor set!");
 
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageView = view;
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-        VkWriteDescriptorSet writeSet{};
-        writeSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writeSet.dstSet = set;
-        writeSet.dstBinding = 0u;
-        writeSet.descriptorCount = 1u;
-        writeSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        writeSet.pImageInfo = &imageInfo;
-        vkUpdateDescriptorSets(m_device, 1u, &writeSet, 0u, nullptr);
-
-        m_descriptorSets.push_back(set);
-    }
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageView = *m_lightingView;
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    VkWriteDescriptorSet writeSet{};
+    writeSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeSet.dstSet = m_descriptorSet;
+    writeSet.dstBinding = 0u;
+    writeSet.descriptorCount = 1u;
+    writeSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writeSet.pImageInfo = &imageInfo;
+    vkUpdateDescriptorSets(m_device, 1u, &writeSet, 0u, nullptr);
 }
 
 void Renderer::render() const
@@ -88,21 +106,68 @@ void Renderer::render() const
     VK_CHECK(vkBeginCommandBuffer(m_cmdBuf, &beginInfo), "renderer failed to begin command buffer!");
 
     m_lightingPass->bindPipeline(m_cmdBuf);
-    vkCmdBindDescriptorSets(m_cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_lightingPass->getPipelineLayout(), 0u, 1u, &m_descriptorSets[swapIdx], 0u, nullptr);
+    vkCmdBindDescriptorSets(m_cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_lightingPass->getPipelineLayout(), 0u, 1u, &m_descriptorSet, 0u, nullptr);
 
+    VkImageSubresourceRange subRange{};
+    subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    subRange.baseArrayLayer = 0u;
+    subRange.baseMipLevel = 0u;
+    subRange.layerCount = 1u;
+    subRange.levelCount = 1u;
     VkImageMemoryBarrier imageMemoryBarrier{};
     imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     imageMemoryBarrier.srcAccessMask = 0u;
     imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-    imageMemoryBarrier.image = m_swapchainImages[swapIdx];
-    vkCmdPipelineBarrier(m_cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+    imageMemoryBarrier.image = *m_lightingImg;
+    imageMemoryBarrier.subresourceRange = subRange;
 
-    vkCmdDispatch(m_cmdBuf, (m_extent.width + 7u) / 8u, (m_extent.height + 7u) / 8u, 1u);
+    vkCmdPipelineBarrier(m_cmdBuf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+    vkCmdDispatch(m_cmdBuf, (m_rc->m_extent.width + 7u) / 8u, (m_rc->m_extent.height + 7u) / 8u, 1u);
+
+    imageMemoryBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+    vkCmdPipelineBarrier(m_cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+
+    VkImage swapImg = m_rc->getSwapchainImage(swapIdx);
+    imageMemoryBarrier.srcAccessMask = 0u;
+    imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    imageMemoryBarrier.image = swapImg;
+
+    vkCmdPipelineBarrier(m_cmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+
+    VkImageSubresourceLayers subLayers{};
+    subLayers.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    subLayers.baseArrayLayer = 0u;
+    subLayers.layerCount = 1u;
+    subLayers.mipLevel = 0u;
+    VkOffset3D offsets[] = { {0, 0, 0}, {static_cast<int32_t>(m_rc->m_extent.width), static_cast<int32_t>(m_rc->m_extent.height), 1} };
+    VkImageBlit blit{};
+    blit.srcSubresource = subLayers;
+    blit.dstSubresource = subLayers;
+    blit.srcOffsets[0] = offsets[0];
+    blit.dstOffsets[0] = offsets[0];
+    blit.srcOffsets[1] = offsets[1];
+    blit.dstOffsets[1] = offsets[1];
+
+    vkCmdBlitImage(m_cmdBuf, *m_lightingImg, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, swapImg, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &blit, VK_FILTER_NEAREST);
+
+    imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    imageMemoryBarrier.dstAccessMask = 0u;
+    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    
+    vkCmdPipelineBarrier(m_cmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+
     VK_CHECK(vkEndCommandBuffer(m_cmdBuf), "renderer failed to end command buffer!");
 
-    VkPipelineStageFlags waitDstStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    VkPipelineStageFlags waitDstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.waitSemaphoreCount = 1u;

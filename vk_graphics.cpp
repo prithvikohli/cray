@@ -26,7 +26,7 @@ RenderContext::RenderContext(GLFWwindow* window)
     createDeviceAndQueue();
     createCommandBuffer();
     createSwapchain();
-    createSwapchainViews();
+    //createSwapchainViews();
 
     VmaAllocatorCreateInfo allocatorInfo{};
     allocatorInfo.device = m_device;
@@ -38,8 +38,10 @@ RenderContext::RenderContext(GLFWwindow* window)
 
 RenderContext::~RenderContext()
 {
-    for (VkImageView view : m_swapchainViews)
-        vkDestroyImageView(m_device, view, nullptr);
+    vmaDestroyAllocator(m_allocator);
+
+    //for (VkImageView view : m_swapchainViews)
+    //    vkDestroyImageView(m_device, view, nullptr);
     vkDestroySwapchainKHR(m_device, m_swapchain, nullptr);
     vkDestroyCommandPool(m_device, m_cmdPool, nullptr);
     vkDestroyDevice(m_device, nullptr);
@@ -176,7 +178,7 @@ void RenderContext::createSwapchain()
     swapchainInfo.imageColorSpace = VK_COLORSPACE_SRGB_NONLINEAR_KHR;
     swapchainInfo.imageExtent = m_extent;
     swapchainInfo.imageArrayLayers = 1u;
-    swapchainInfo.imageUsage = VK_IMAGE_USAGE_STORAGE_BIT;
+    swapchainInfo.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     swapchainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     swapchainInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -184,41 +186,46 @@ void RenderContext::createSwapchain()
     swapchainInfo.clipped = VK_TRUE;
 
     VK_CHECK(vkCreateSwapchainKHR(m_device, &swapchainInfo, nullptr, &m_swapchain), "failed to create swapchain!");
-}
 
-void RenderContext::createSwapchainViews()
-{
     uint32_t swapchainImageCount;
     VK_CHECK(vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageCount, nullptr), "failed to get swapchain images!");
     m_swapchainImages.resize(swapchainImageCount);
     vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageCount, m_swapchainImages.data());
-
-    m_swapchainViews.reserve(swapchainImageCount);
-    for (VkImage img : m_swapchainImages)
-    {
-        VkImageSubresourceRange subRange{};
-        subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        subRange.layerCount = 1u;
-        subRange.levelCount = 1u;
-        subRange.baseArrayLayer = 0u;
-        subRange.baseMipLevel = 0u;
-
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = img;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = VK_FORMAT_B8G8R8A8_SRGB;
-        viewInfo.subresourceRange = subRange;
-
-        VkImageView view;
-        VK_CHECK(vkCreateImageView(m_device, &viewInfo, nullptr, &view), "failed to create swapchain image views!");
-        m_swapchainViews.push_back(view);
-    }
 }
 
-void RenderContext::acquireNextSwapchainImage(uint32_t* idx, VkSemaphore semaphore) const
+//void RenderContext::createSwapchainViews()
+//{
+//    uint32_t swapchainImageCount;
+//    VK_CHECK(vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageCount, nullptr), "failed to get swapchain images!");
+//    m_swapchainImages.resize(swapchainImageCount);
+//    vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageCount, m_swapchainImages.data());
+//
+//    m_swapchainViews.reserve(swapchainImageCount);
+//    for (VkImage img : m_swapchainImages)
+//    {
+//        VkImageSubresourceRange subRange{};
+//        subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+//        subRange.layerCount = 1u;
+//        subRange.levelCount = 1u;
+//        subRange.baseArrayLayer = 0u;
+//        subRange.baseMipLevel = 0u;
+//
+//        VkImageViewCreateInfo viewInfo{};
+//        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+//        viewInfo.image = img;
+//        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+//        viewInfo.format = VK_FORMAT_B8G8R8A8_SRGB;
+//        viewInfo.subresourceRange = subRange;
+//
+//        VkImageView view;
+//        VK_CHECK(vkCreateImageView(m_device, &viewInfo, nullptr, &view), "failed to create swapchain image views!");
+//        m_swapchainViews.push_back(view);
+//    }
+//}
+
+void RenderContext::acquireNextSwapchainImage(uint32_t* swapIdx, VkSemaphore acquiredSemaphore) const
 {
-    VK_CHECK(vkAcquireNextImageKHR(m_device, m_swapchain, UINT64_MAX, semaphore, VK_NULL_HANDLE, idx), "failed to acquire swapchain image!");
+    VK_CHECK(vkAcquireNextImageKHR(m_device, m_swapchain, UINT64_MAX, acquiredSemaphore, VK_NULL_HANDLE, swapIdx), "failed to acquire swapchain image!");
 }
 
 void RenderContext::submitToQueue(VkSubmitInfo submitInfo, VkFence fence) const
@@ -226,17 +233,29 @@ void RenderContext::submitToQueue(VkSubmitInfo submitInfo, VkFence fence) const
     VK_CHECK(vkQueueSubmit(m_queue, 1u, &submitInfo, fence), "failed to submit to queue!");
 }
 
-void RenderContext::present(uint32_t swapIdx, VkSemaphore semaphore) const
+void RenderContext::present(uint32_t swapIdx, VkSemaphore waitSemaphore) const
 {
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.waitSemaphoreCount = 1u;
-    presentInfo.pWaitSemaphores = &semaphore;
+    presentInfo.pWaitSemaphores = &waitSemaphore;
     presentInfo.swapchainCount = 1u;
     presentInfo.pSwapchains = &m_swapchain;
     presentInfo.pImageIndices = &swapIdx;
 
     VK_CHECK(vkQueuePresentKHR(m_queue, &presentInfo), "failed to present swapchain!");
+}
+
+std::shared_ptr<Image> RenderContext::createImage(VkImageCreateInfo imageInfo, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const
+{
+    std::shared_ptr<Image> img = std::make_shared<Image>(m_allocator, imageInfo, memoryUsage, allocFlags, memoryFlags);
+    return img;
+}
+
+std::shared_ptr<ImageView> RenderContext::createImageView(const vk::Image& image, VkImageViewType viewType, VkImageSubresourceRange subRange) const
+{
+    std::shared_ptr<ImageView> view = std::make_shared<ImageView>(m_device, image, viewType, subRange);
+    return view;
 }
 
 Buffer::Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) : m_allocator(allocator), m_size(size)

@@ -17,52 +17,6 @@
 namespace vk
 {
 
-class RenderContext
-{
-public:
-    RenderContext(GLFWwindow* window);
-    RenderContext(const RenderContext&) = delete;
-
-    ~RenderContext();
-
-    VkDevice getDevice() const { return m_device; }
-    VkCommandBuffer getCommandBuffer() const { return m_cmdBuf; }
-    void acquireNextSwapchainImage(uint32_t* idx, VkSemaphore semaphore) const;
-    std::vector<VkImage> getSwapchainImages() const { return m_swapchainImages; }
-    std::vector<VkImageView> getSwapchainImageViews() const { return m_swapchainViews; }
-
-    void submitToQueue(VkSubmitInfo submitInfo, VkFence fence) const;
-    void present(uint32_t swapIdx, VkSemaphore semaphore) const;
-    void waitIdle() const { VK_CHECK(vkDeviceWaitIdle(m_device), "device failed to wait idle!"); }
-
-    RenderContext& operator=(const RenderContext&) = delete;
-
-    VkExtent2D m_extent;
-
-private:
-    VkInstance m_instance;
-    VkSurfaceKHR m_surface;
-    VkPhysicalDevice m_physicalDevice;
-    uint32_t m_queueFamilyIdx;
-    VkDevice m_device;
-    VkQueue m_queue;
-    VkCommandPool m_cmdPool;
-    VkCommandBuffer m_cmdBuf;
-    VkSwapchainKHR m_swapchain;
-    std::vector<VkImage> m_swapchainImages;
-    std::vector<VkImageView> m_swapchainViews;
-    VmaAllocator m_allocator;
-
-    void createInstance();
-    void createSurface(GLFWwindow* window);
-    void getPhysicalDevice();
-    void chooseGctPresentQueue();
-    void createDeviceAndQueue();
-    void createCommandBuffer();
-    void createSwapchain();
-    void createSwapchainViews();
-};
-
 class Buffer
 {
 public:
@@ -127,6 +81,55 @@ public:
 private:
     VkDevice m_device;
     VkImageView m_handle;
+};
+
+class RenderContext
+{
+public:
+    RenderContext(GLFWwindow* window);
+    RenderContext(const RenderContext&) = delete;
+
+    ~RenderContext();
+
+    VkDevice getDevice() const { return m_device; }
+    VkCommandBuffer getCommandBuffer() const { return m_cmdBuf; }
+    void acquireNextSwapchainImage(uint32_t* swapIdx, VkSemaphore acquiredSemaphore) const;
+    VkImage getSwapchainImage(uint32_t idx) const { return m_swapchainImages[idx]; }
+    //std::vector<VkImageView> getSwapchainImageViews() const { return m_swapchainViews; }
+
+    void submitToQueue(VkSubmitInfo submitInfo, VkFence fence) const;
+    void present(uint32_t swapIdx, VkSemaphore waitSemaphore) const;
+    void waitIdle() const { VK_CHECK(vkDeviceWaitIdle(m_device), "device failed to wait idle!"); }
+
+    std::shared_ptr<Image> createImage(VkImageCreateInfo imageInfo, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const;
+    std::shared_ptr<ImageView> createImageView(const vk::Image& image, VkImageViewType viewType, VkImageSubresourceRange subRange) const;
+
+    RenderContext& operator=(const RenderContext&) = delete;
+
+    VkExtent2D m_extent;
+
+private:
+    VkInstance m_instance;
+    VkSurfaceKHR m_surface;
+    VkPhysicalDevice m_physicalDevice;
+    uint32_t m_queueFamilyIdx;
+    VkDevice m_device;
+    VkQueue m_queue;
+    VkCommandPool m_cmdPool;
+    VkCommandBuffer m_cmdBuf;
+    VkSwapchainKHR m_swapchain;
+    std::vector<VkImage> m_swapchainImages;
+    //std::vector<VkImageView> m_swapchainViews;
+    VmaAllocator m_allocator;
+
+    void createInstance();
+    void createSurface(GLFWwindow* window);
+    void getPhysicalDevice();
+    void chooseGctPresentQueue();
+    void createDeviceAndQueue();
+    void createCommandBuffer();
+    void createSwapchain();
+    //void createSwapchainViews();
 };
 
 }

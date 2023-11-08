@@ -39,7 +39,7 @@ void GBufferPass::createRenderPass()
 
     VkAttachmentReference depthRef{};
     depthRef.attachment = 0u;
-    depthRef.attachment = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
     VkAttachmentReference albedoMetallicRef{};
     albedoMetallicRef.attachment = 1u;
@@ -64,7 +64,7 @@ void GBufferPass::createRenderPass()
     dependency.srcSubpass = 0u;
     dependency.dstSubpass = VK_SUBPASS_EXTERNAL;
     dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    dependency.dstAccessMask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
     dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     dependency.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
@@ -175,8 +175,8 @@ void GBufferPass::createPipeline()
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
-    viewport.width = m_extent.width;
-    viewport.height = m_extent.height;
+    viewport.width = static_cast<float>(m_extent.width);
+    viewport.height = static_cast<float>(m_extent.height);
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
     VkRect2D scissor;
