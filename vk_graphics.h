@@ -15,6 +15,8 @@
 #define LOGE(msg) std::cerr << msg << std::endl
 #define VK_CHECK(func, err) if (func != VK_SUCCESS) throw std::runtime_error(err)
 
+#define ARRAY_LENGTH(arr) (sizeof(arr) / sizeof(*arr))
+
 namespace vk
 {
 
@@ -96,7 +98,6 @@ public:
     VkCommandBuffer getCommandBuffer() const { return m_cmdBuf; }
     void acquireNextSwapchainImage(uint32_t* swapIdx, VkSemaphore acquiredSemaphore) const;
     VkImage getSwapchainImage(uint32_t idx) const { return m_swapchainImages[idx]; }
-    //std::vector<VkImageView> getSwapchainImageViews() const { return m_swapchainViews; }
 
     void submitToQueue(VkSubmitInfo submitInfo, VkFence fence) const;
     void present(uint32_t swapIdx, VkSemaphore waitSemaphore) const;
@@ -125,7 +126,6 @@ private:
     VkCommandBuffer m_cmdBuf;
     VkSwapchainKHR m_swapchain;
     std::vector<VkImage> m_swapchainImages;
-    //std::vector<VkImageView> m_swapchainViews;
     VmaAllocator m_allocator;
 
     void createInstance();
@@ -135,7 +135,6 @@ private:
     void createDeviceAndQueue();
     void createCommandBuffer();
     void createSwapchain();
-    //void createSwapchainViews();
 };
 
 }

@@ -26,7 +26,6 @@ RenderContext::RenderContext(GLFWwindow* window)
     createDeviceAndQueue();
     createCommandBuffer();
     createSwapchain();
-    //createSwapchainViews();
 
     VmaAllocatorCreateInfo allocatorInfo{};
     allocatorInfo.device = m_device;
@@ -40,8 +39,6 @@ RenderContext::~RenderContext()
 {
     vmaDestroyAllocator(m_allocator);
 
-    //for (VkImageView view : m_swapchainViews)
-    //    vkDestroyImageView(m_device, view, nullptr);
     vkDestroySwapchainKHR(m_device, m_swapchain, nullptr);
     vkDestroyCommandPool(m_device, m_cmdPool, nullptr);
     vkDestroyCommandPool(m_device, m_cmdPoolTransient, nullptr);
@@ -198,36 +195,6 @@ void RenderContext::createSwapchain()
     vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageCount, m_swapchainImages.data());
 }
 
-//void RenderContext::createSwapchainViews()
-//{
-//    uint32_t swapchainImageCount;
-//    VK_CHECK(vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageCount, nullptr), "failed to get swapchain images!");
-//    m_swapchainImages.resize(swapchainImageCount);
-//    vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageCount, m_swapchainImages.data());
-//
-//    m_swapchainViews.reserve(swapchainImageCount);
-//    for (VkImage img : m_swapchainImages)
-//    {
-//        VkImageSubresourceRange subRange{};
-//        subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-//        subRange.layerCount = 1u;
-//        subRange.levelCount = 1u;
-//        subRange.baseArrayLayer = 0u;
-//        subRange.baseMipLevel = 0u;
-//
-//        VkImageViewCreateInfo viewInfo{};
-//        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-//        viewInfo.image = img;
-//        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-//        viewInfo.format = VK_FORMAT_B8G8R8A8_SRGB;
-//        viewInfo.subresourceRange = subRange;
-//
-//        VkImageView view;
-//        VK_CHECK(vkCreateImageView(m_device, &viewInfo, nullptr, &view), "failed to create swapchain image views!");
-//        m_swapchainViews.push_back(view);
-//    }
-//}
-
 void RenderContext::acquireNextSwapchainImage(uint32_t* swapIdx, VkSemaphore acquiredSemaphore) const
 {
     VK_CHECK(vkAcquireNextImageKHR(m_device, m_swapchain, UINT64_MAX, acquiredSemaphore, VK_NULL_HANDLE, swapIdx), "failed to acquire swapchain image!");
@@ -367,6 +334,15 @@ void RenderContext::copyImage(const Image& src, const Image& dst) const
     copy.dstSubresource = subLayers;
 
     vkCmdCopyImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &copy);
+
+    // TODO make this configurable?
+    imageMemoryBarrier.srcAccessMask = 0;
+    imageMemoryBarrier.dstAccessMask = 0;
+    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+
     VK_CHECK(vkEndCommandBuffer(cmd), "failed to end copy command buffer!");
 
     VkSubmitInfo submitInfo{};

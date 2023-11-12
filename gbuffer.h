@@ -18,6 +18,9 @@ public:
 
     ~GBufferPass();
 
+    VkDescriptorSetLayout getDescriptorSetLayout() const { return m_descriptorSetLayout; }
+    VkPipelineLayout getPipelineLayout() const { return m_pipelineLayout; }
+
     void bindBundle(GBufferBundle bundle);
     void begin(VkCommandBuffer cmdBuf) const;
     void end(VkCommandBuffer cmdBuf) const;

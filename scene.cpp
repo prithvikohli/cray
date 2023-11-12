@@ -124,6 +124,8 @@ void Scene::createMaterial(tinygltf::Model& model, tinygltf::Material& material)
         m_rc->copyImage(*stagingImg, *mat.normal);
     }
 
+    // TODO emissive
+
     //{
     //    stagingImageInfo.extent = { static_cast<uint32_t>(emissiveImg.width), static_cast<uint32_t>(emissiveImg.height), 1u };
     //    std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(stagingImageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);

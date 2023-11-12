@@ -83,16 +83,28 @@ void GBufferPass::createRenderPass()
 
 void GBufferPass::createLayouts()
 {
-    VkDescriptorSetLayoutBinding bindingInfo{};
-    bindingInfo.binding = 0u;
-    bindingInfo.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    bindingInfo.descriptorCount = 1u;
-    bindingInfo.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    VkDescriptorSetLayoutBinding uniformsBinding{};
+    uniformsBinding.binding = 0u;
+    uniformsBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uniformsBinding.descriptorCount = 1u;
+    uniformsBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
+    VkDescriptorSetLayoutBinding albedoBinding{};
+    albedoBinding.binding = 1u;
+    albedoBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    albedoBinding.descriptorCount = 1u;
+    albedoBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutBinding metallicRoughnessBinding = albedoBinding;
+    metallicRoughnessBinding.binding = 2u;
+    VkDescriptorSetLayoutBinding normalBinding = albedoBinding;
+    normalBinding.binding = 3u;
+
+    VkDescriptorSetLayoutBinding bindings[] = { uniformsBinding, albedoBinding, metallicRoughnessBinding, normalBinding };
     VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{};
     descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutInfo.bindingCount = 1u;
-    descriptorSetLayoutInfo.pBindings = &bindingInfo;
+    descriptorSetLayoutInfo.bindingCount = ARRAY_LENGTH(bindings);
+    descriptorSetLayoutInfo.pBindings = bindings;
 
     VK_CHECK(vkCreateDescriptorSetLayout(m_device, &descriptorSetLayoutInfo, nullptr, &m_descriptorSetLayout), "failed to create GBuffer pipeline descriptor set layout!");
 
@@ -144,7 +156,7 @@ void GBufferPass::createPipeline()
     VkVertexInputBindingDescription vertexBindingTexCoord{};
     vertexBindingTexCoord.binding = 2u;
     vertexBindingTexCoord.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    vertexBindingTexCoord.stride = 12u;
+    vertexBindingTexCoord.stride = 8u;
     VkVertexInputBindingDescription vertexBindings[] = { vertexBindingPosition, vertexBindingNormal, vertexBindingTexCoord };
 
     VkVertexInputAttributeDescription vertexAttributePosition{};

@@ -2,6 +2,83 @@
 
 #include <fstream>
 
+DrawableNode::DrawableNode(Node* node, VkDevice device, VkPipelineLayout layout, VkDescriptorSet descriptorSet, std::shared_ptr<vk::Buffer> uniformsBuffer, MaterialViews matViews, VkSampler sampler) : m_node(node), m_layout(layout), m_descriptorSet(descriptorSet), m_uniformsBuffer(uniformsBuffer), m_matViews(matViews)
+{
+    VkDescriptorBufferInfo uniformsInfo{};
+    uniformsInfo.buffer = *m_uniformsBuffer;
+    uniformsInfo.offset = 0u;
+    uniformsInfo.range = m_uniformsBuffer->m_size;
+    VkWriteDescriptorSet writeUniforms{};
+    writeUniforms.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeUniforms.dstSet = m_descriptorSet;
+    writeUniforms.dstBinding = 0u;
+    writeUniforms.descriptorCount = 1u;
+    writeUniforms.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writeUniforms.pBufferInfo = &uniformsInfo;
+
+    VkDescriptorImageInfo albedoInfo{};
+    albedoInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    albedoInfo.imageView = *m_matViews.albedo;
+    albedoInfo.sampler = sampler;
+    VkWriteDescriptorSet writeAlbedo{};
+    writeAlbedo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeAlbedo.dstSet = m_descriptorSet;
+    writeAlbedo.dstBinding = 1u;
+    writeAlbedo.descriptorCount = 1u;
+    writeAlbedo.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writeAlbedo.pImageInfo = &albedoInfo;
+
+    VkDescriptorImageInfo metallicRoughnessInfo{};
+    metallicRoughnessInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    metallicRoughnessInfo.imageView = *m_matViews.metallicRoughness;
+    metallicRoughnessInfo.sampler = sampler;
+    VkWriteDescriptorSet writeMetallicRoughness{};
+    writeMetallicRoughness.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeMetallicRoughness.dstSet = m_descriptorSet;
+    writeMetallicRoughness.dstBinding = 2u;
+    writeMetallicRoughness.descriptorCount = 1u;
+    writeMetallicRoughness.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writeMetallicRoughness.pImageInfo = &metallicRoughnessInfo;
+
+    VkDescriptorImageInfo normalInfo{};
+    normalInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    normalInfo.imageView = *m_matViews.normal;
+    normalInfo.sampler = sampler;
+    VkWriteDescriptorSet writeNormal{};
+    writeNormal.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeNormal.dstSet = m_descriptorSet;
+    writeNormal.dstBinding = 3u;
+    writeNormal.descriptorCount = 1u;
+    writeNormal.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writeNormal.pImageInfo = &normalInfo;
+
+    VkWriteDescriptorSet writes[] = { writeUniforms, writeAlbedo, writeMetallicRoughness, writeNormal };
+    vkUpdateDescriptorSets(device, ARRAY_LENGTH(writes), writes, 0u, nullptr);
+}
+
+void DrawableNode::update(Camera cam) const
+{
+    Uniforms uniforms;
+
+    uniforms.model = m_node->recursiveTransform;
+    uniforms.view = cam.view;
+    uniforms.proj = cam.proj;
+
+    void* data = m_uniformsBuffer->map();
+    memcpy(data, &uniforms, sizeof(Uniforms));
+    m_uniformsBuffer->unmap();
+}
+
+void DrawableNode::draw(VkCommandBuffer cmd) const
+{
+    VkBuffer buffers[] = { m_node->mesh->positionBuffer->getHandle(), m_node->mesh->normalBuffer->getHandle(), m_node->mesh->texCoordBuffer->getHandle() };
+    VkDeviceSize offsets[] = { 0u, 0u, 0u };
+    vkCmdBindVertexBuffers(cmd, 0u, ARRAY_LENGTH(buffers), buffers, offsets);
+    vkCmdBindIndexBuffer(cmd, *m_node->mesh->indexBuffer, 0u, VK_INDEX_TYPE_UINT16);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_layout, 0u, 1u, &m_descriptorSet, 0u, nullptr);
+    vkCmdDrawIndexed(cmd, m_node->mesh->indexCount, 1u, 0u, 0u, 0u);
+}
+
 Renderer::Renderer(vk::RenderContext* rc, const std::string& shadersDir) : m_rc(rc), m_device(rc->getDevice()), m_cmdBuf(rc->getCommandBuffer())
 {
     // create GBuffer pass
@@ -81,13 +158,25 @@ Renderer::Renderer(vk::RenderContext* rc, const std::string& shadersDir) : m_rc(
     }
 
     // create other objects owned by renderer
+    m_lightingUniforms = m_rc->createBuffer(sizeof(LightingUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    createSamplers();
+    createLightingDescriptorSet();
     createSyncObjects();
-    createDescriptorSet();
+
+    m_camera.pos = glm::vec3(0.0f);
+    m_camera.view = glm::mat4(1.0f);
+    m_camera.proj = glm::perspective(glm::radians(45.0f), m_rc->m_extent.width / (float)m_rc->m_extent.height, 0.1f, 100.0f);
+    m_camera.proj[1][1] *= -1;
 }
 
 Renderer::~Renderer()
 {
-    vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
+    vkDestroySampler(m_device, m_samplerNearest, nullptr);
+    vkDestroySampler(m_device, m_samplerLinear, nullptr);
+    if (m_descriptorPoolDrawables != VK_NULL_HANDLE)
+        vkDestroyDescriptorPool(m_device, m_descriptorPoolDrawables, nullptr);
+    vkDestroyDescriptorPool(m_device, m_descriptorPoolLighting, nullptr);
     vkDestroySemaphore(m_device, m_imageAcquiredSemaphore, nullptr);
     vkDestroySemaphore(m_device, m_renderFinishedSemaphore, nullptr);
     vkDestroyFence(m_device, m_inFlightFence, nullptr);
@@ -106,46 +195,181 @@ void Renderer::createSyncObjects()
     VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlightFence), "failed to create renderer in flight fence!");
 }
 
-void Renderer::createDescriptorSet()
+void Renderer::createLightingDescriptorSet()
 {
     // create descriptor set for lighting pass
-    VkDescriptorPoolSize poolSize{};
-    poolSize.descriptorCount = 1u;
-    poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    VkDescriptorPoolSize outputSize{};
+    outputSize.descriptorCount = 1u;
+    outputSize.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    VkDescriptorPoolSize inputSize{};
+    inputSize.descriptorCount = 3u;
+    inputSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    VkDescriptorPoolSize uniformsSize{};
+    uniformsSize.descriptorCount = 1u;
+    uniformsSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 
+    VkDescriptorPoolSize sizes[] = { outputSize, inputSize, uniformsSize };
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.maxSets = 1u;
-    poolInfo.poolSizeCount = 1u;
-    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.poolSizeCount = ARRAY_LENGTH(sizes);
+    poolInfo.pPoolSizes = sizes;
 
-    VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool), "failed to create renderer descriptor pool!");
+    VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPoolLighting), "failed to create renderer lighting descriptor pool!");
 
     VkDescriptorSetLayout layout = m_lightingPass->getDescriptorSetLayout();
     VkDescriptorSetAllocateInfo setAllocInfo{};
     setAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    setAllocInfo.descriptorPool = m_descriptorPool;
+    setAllocInfo.descriptorPool = m_descriptorPoolLighting;
     setAllocInfo.descriptorSetCount = 1u;
     setAllocInfo.pSetLayouts = &layout;
 
-    VK_CHECK(vkAllocateDescriptorSets(m_device, &setAllocInfo, &m_descriptorSet), "failed to allocate renderer descriptor set!");
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &setAllocInfo, &m_descriptorSetLighting), "failed to allocate renderer lighting descriptor set!");
 
-    VkDescriptorImageInfo imageInfo{};
-    imageInfo.imageView = *m_lightingView;
-    imageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    VkWriteDescriptorSet writeSet{};
-    writeSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeSet.dstSet = m_descriptorSet;
-    writeSet.dstBinding = 0u;
-    writeSet.descriptorCount = 1u;
-    writeSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    writeSet.pImageInfo = &imageInfo;
-    vkUpdateDescriptorSets(m_device, 1u, &writeSet, 0u, nullptr);
+    VkDescriptorImageInfo outputInfo{};
+    outputInfo.imageView = *m_lightingView;
+    outputInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    VkWriteDescriptorSet writeOutput{};
+    writeOutput.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeOutput.dstSet = m_descriptorSetLighting;
+    writeOutput.dstBinding = 0u;
+    writeOutput.descriptorCount = 1u;
+    writeOutput.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writeOutput.pImageInfo = &outputInfo;
+
+    VkDescriptorImageInfo depthInfo{};
+    depthInfo.imageView = *m_gbuffer.depth;
+    depthInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    depthInfo.sampler = m_samplerNearest;
+    VkWriteDescriptorSet writeDepth{};
+    writeDepth.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeDepth.dstSet = m_descriptorSetLighting;
+    writeDepth.dstBinding = 1u;
+    writeDepth.descriptorCount = 1u;
+    writeDepth.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writeDepth.pImageInfo = &depthInfo;
+
+    VkDescriptorImageInfo albedoMetallicInfo{};
+    albedoMetallicInfo.imageView = *m_gbuffer.albedoMetallic;
+    albedoMetallicInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    albedoMetallicInfo.sampler = m_samplerNearest;
+    VkWriteDescriptorSet writeAlbedoMetallic{};
+    writeAlbedoMetallic.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeAlbedoMetallic.dstSet = m_descriptorSetLighting;
+    writeAlbedoMetallic.dstBinding = 2u;
+    writeAlbedoMetallic.descriptorCount = 1u;
+    writeAlbedoMetallic.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writeAlbedoMetallic.pImageInfo = &albedoMetallicInfo;
+
+    VkDescriptorImageInfo normalRoughnessInfo{};
+    normalRoughnessInfo.imageView = *m_gbuffer.normalRoughness;
+    normalRoughnessInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    normalRoughnessInfo.sampler = m_samplerNearest;
+    VkWriteDescriptorSet writeNormalRoughness{};
+    writeNormalRoughness.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeNormalRoughness.dstSet = m_descriptorSetLighting;
+    writeNormalRoughness.dstBinding = 3u;
+    writeNormalRoughness.descriptorCount = 1u;
+    writeNormalRoughness.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writeNormalRoughness.pImageInfo = &normalRoughnessInfo;
+
+    VkDescriptorBufferInfo uniformsInfo{};
+    uniformsInfo.buffer = *m_lightingUniforms;
+    uniformsInfo.offset = 0u;
+    uniformsInfo.range = m_lightingUniforms->m_size;
+    VkWriteDescriptorSet writeUniforms{};
+    writeUniforms.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeUniforms.dstSet = m_descriptorSetLighting;
+    writeUniforms.dstBinding = 4u;
+    writeUniforms.descriptorCount = 1u;
+    writeUniforms.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writeUniforms.pBufferInfo = &uniformsInfo;
+
+    VkWriteDescriptorSet writes[] = { writeOutput, writeDepth, writeAlbedoMetallic, writeNormalRoughness, writeUniforms };
+    vkUpdateDescriptorSets(m_device, ARRAY_LENGTH(writes), writes, 0u, nullptr);
+}
+
+void Renderer::createSamplers()
+{
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_NEAREST;
+    samplerInfo.minFilter = VK_FILTER_NEAREST;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
+
+    VK_CHECK(vkCreateSampler(m_device, &samplerInfo, nullptr, &m_samplerNearest), "failed to create sampler!");
+
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+
+    VK_CHECK(vkCreateSampler(m_device, &samplerInfo, nullptr, &m_samplerLinear), "failed to create sampler!");
+}
+
+DrawableNode Renderer::createDrawableNode(Node* node) const
+{
+    // create uniforms buffer for this drawable node
+    std::shared_ptr<vk::Buffer> uniformsBuffer = m_rc->createBuffer(sizeof(Uniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    // create texture views
+    VkImageSubresourceRange subRange{};
+    subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    subRange.baseArrayLayer = 0u;
+    subRange.baseMipLevel = 0u;
+    subRange.layerCount = node->mesh->material->albedo->m_imageInfo.arrayLayers;
+    subRange.baseMipLevel = 0u;
+    subRange.levelCount = node->mesh->material->albedo->m_imageInfo.mipLevels;
+
+    MaterialViews matViews;
+    matViews.albedo = m_rc->createImageView(*node->mesh->material->albedo, VK_IMAGE_VIEW_TYPE_2D, subRange);
+    matViews.metallicRoughness = m_rc->createImageView(*node->mesh->material->metallicRoughness, VK_IMAGE_VIEW_TYPE_2D, subRange);
+    matViews.normal = m_rc->createImageView(*node->mesh->material->normal, VK_IMAGE_VIEW_TYPE_2D, subRange);
+
+    // allocate descriptor set
+    VkDescriptorSetLayout layout = m_gbufferPass->getDescriptorSetLayout();
+    VkDescriptorSetAllocateInfo setAllocInfo{};
+    setAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    setAllocInfo.descriptorPool = m_descriptorPoolDrawables;
+    setAllocInfo.descriptorSetCount = 1u;
+    setAllocInfo.pSetLayouts = &layout;
+
+    VkDescriptorSet descriptorSet;
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &setAllocInfo, &descriptorSet), "failed to allocate drawable node descriptor set!");
+
+    return DrawableNode(node, m_device, m_gbufferPass->getPipelineLayout(), descriptorSet, uniformsBuffer, matViews, m_samplerLinear);
 }
 
 void Renderer::loadScene(const std::string& gltfBinaryFilename)
 {
     m_scene = std::make_unique<Scene>(m_rc, gltfBinaryFilename);
+    if (m_descriptorPoolDrawables != VK_NULL_HANDLE)
+        vkDestroyDescriptorPool(m_device, m_descriptorPoolDrawables, nullptr);
+
+    // create descriptor pool for drawable nodes (for GBuffer pipeline)
+    VkDescriptorPoolSize uniformsSize{};
+    uniformsSize.descriptorCount = m_scene->m_nodes.size();
+    uniformsSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    VkDescriptorPoolSize texturesSize{};
+    texturesSize.descriptorCount = 3u * m_scene->m_nodes.size();
+    texturesSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+
+    VkDescriptorPoolSize poolSizes[] = { uniformsSize, texturesSize };
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.maxSets = m_scene->m_nodes.size();
+    poolInfo.poolSizeCount = 2u;
+    poolInfo.pPoolSizes = poolSizes;
+
+    VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPoolDrawables), "failed to create renderer drawables descriptor pool!");
+
+    for (Node* n : m_scene->m_nodes)
+    {
+        DrawableNode dn = createDrawableNode(n);
+        m_drawableNodes.push_back(dn);
+    }
 }
 
 void Renderer::render() const
@@ -163,11 +387,26 @@ void Renderer::render() const
 
     // gbuffer pass
     m_gbufferPass->begin(m_cmdBuf);
+    for (const DrawableNode& dn : m_drawableNodes)
+    {
+        dn.update(m_camera);
+        dn.draw(m_cmdBuf);
+    }
     m_gbufferPass->end(m_cmdBuf);
 
     // lighting pass
     m_lightingPass->bindPipeline(m_cmdBuf);
-    vkCmdBindDescriptorSets(m_cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_lightingPass->getPipelineLayout(), 0u, 1u, &m_descriptorSet, 0u, nullptr);
+
+    // update lighting uniforms
+    LightingUniforms lu;
+    lu.camPos = m_camera.pos;
+    lu.view = m_camera.view;
+    lu.proj = m_camera.proj;
+    void* data = m_lightingUniforms->map();
+    memcpy(data, &lu, sizeof(LightingUniforms));
+    m_lightingUniforms->unmap();
+
+    vkCmdBindDescriptorSets(m_cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_lightingPass->getPipelineLayout(), 0u, 1u, &m_descriptorSetLighting, 0u, nullptr);
 
     VkImageSubresourceRange subRange{};
     subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -223,7 +462,7 @@ void Renderer::render() const
     imageMemoryBarrier.dstAccessMask = 0u;
     imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    
+
     vkCmdPipelineBarrier(m_cmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
 
     VK_CHECK(vkEndCommandBuffer(m_cmdBuf), "renderer failed to end command buffer!");

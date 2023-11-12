@@ -27,46 +27,41 @@ void LightingPass::createShader(const std::vector<uint32_t>& lightingCode)
 
 void LightingPass::createLayouts()
 {
-    //VkDescriptorSetLayoutBinding depthBinding{};
-    //depthBinding.binding = 0u;
-    //depthBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    //depthBinding.descriptorCount = 1u;
-    //depthBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    //VkDescriptorSetLayoutBinding albedoMetallicBinding{};
-    //albedoMetallicBinding.binding = 1u;
-    //albedoMetallicBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    //albedoMetallicBinding.descriptorCount = 1u;
-    //albedoMetallicBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    //VkDescriptorSetLayoutBinding normalRoughnessBinding{};
-    //normalRoughnessBinding.binding = 2u;
-    //normalRoughnessBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    //normalRoughnessBinding.descriptorCount = 1u;
-    //normalRoughnessBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    //VkDescriptorSetLayoutBinding emissiveBinding{};
-    //depthBinding.binding = 3u;
-    //depthBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    //depthBinding.descriptorCount = 1u;
-    //depthBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
-    //VkDescriptorSetLayoutBinding outputBinding{};
-    //depthBinding.binding = 4u;
-    //depthBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    //depthBinding.descriptorCount = 1u;
-    //depthBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
     VkDescriptorSetLayoutBinding outputBinding{};
     outputBinding.binding = 0u;
     outputBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     outputBinding.descriptorCount = 1u;
     outputBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
+    VkDescriptorSetLayoutBinding depthBinding{};
+    depthBinding.binding = 1u;
+    depthBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    depthBinding.descriptorCount = 1u;
+    depthBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutBinding albedoMetallicBinding{};
+    albedoMetallicBinding.binding = 2u;
+    albedoMetallicBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    albedoMetallicBinding.descriptorCount = 1u;
+    albedoMetallicBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutBinding normalRoughnessBinding{};
+    normalRoughnessBinding.binding = 3u;
+    normalRoughnessBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    normalRoughnessBinding.descriptorCount = 1u;
+    normalRoughnessBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutBinding uniformsBinding{};
+    uniformsBinding.binding = 4u;
+    uniformsBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    uniformsBinding.descriptorCount = 1u;
+    uniformsBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutBinding bindings[] = { outputBinding, depthBinding, albedoMetallicBinding, normalRoughnessBinding, uniformsBinding };
     VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{};
     descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutInfo.bindingCount = 1u;
-    descriptorSetLayoutInfo.pBindings = &outputBinding;
+    descriptorSetLayoutInfo.bindingCount = ARRAY_LENGTH(bindings);
+    descriptorSetLayoutInfo.pBindings = bindings;
 
     VK_CHECK(vkCreateDescriptorSetLayout(m_device, &descriptorSetLayoutInfo, nullptr, &m_descriptorSetLayout), "failed to create lighting pass descriptor set layout!");
 

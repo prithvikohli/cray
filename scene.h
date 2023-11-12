@@ -14,7 +14,7 @@ struct Material
     std::shared_ptr<vk::Image> albedo;
     std::shared_ptr<vk::Image> metallicRoughness;
     std::shared_ptr<vk::Image> normal;
-    std::shared_ptr<vk::Image> emissive;
+    //std::shared_ptr<vk::Image> emissive;
 };
 
 struct Mesh
@@ -46,12 +46,13 @@ public:
 
     Scene& operator=(const Scene&) = delete;
 
+    std::vector<Node*> m_nodes;
+
 private:
     vk::RenderContext* m_rc;
 
     std::vector<Material> m_materials;
     std::vector<Mesh> m_meshes;
-    std::vector<Node*> m_nodes;
 
     void createMaterial(tinygltf::Model& model, tinygltf::Material& material);
     void createMesh(tinygltf::Model& model, tinygltf::Mesh& mesh);

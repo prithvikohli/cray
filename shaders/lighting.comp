@@ -4,12 +4,82 @@
 
 #define WINDOW_WIDTH 2560
 #define WINDOW_HEIGHT 1440
+#define PI 3.14159265358979323846
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, rgba8) uniform image2D img;
+layout(set = 0, binding = 0) uniform writeonly image2D img;
+layout(set = 0, binding = 1) uniform sampler2D depthTex;
+layout(set = 0, binding = 2) uniform sampler2D albedoMetallicTex;
+layout(set = 0, binding = 3) uniform sampler2D normalRoughnessTex;
+
+layout(set = 0, binding = 4) uniform LightingUniforms
+{
+    mat4 view;
+    mat4 proj;
+    vec3 viewPos;
+};
+
+float D_GGX(float NoH, float a) {
+    float a2 = a * a;
+    float f = (NoH * a2 - NoH) * NoH + 1.0;
+    return a2 / (PI * f * f);
+}
+
+vec3 F_Schlick(float u, vec3 f0) {
+    return f0 + (vec3(1.0) - f0) * pow(1.0 - u, 5.0);
+}
+
+float V_SmithGGXCorrelated(float NoV, float NoL, float a) {
+    float a2 = a * a;
+    float GGXL = NoV * sqrt((-NoL * a2 + NoL) * NoL + a2);
+    float GGXV = NoL * sqrt((-NoV * a2 + NoV) * NoV + a2);
+    return 0.5 / (GGXV + GGXL);
+}
 
 void main()
 {
-    imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(float(gl_GlobalInvocationID.x) / WINDOW_WIDTH, float(gl_GlobalInvocationID.y) / WINDOW_HEIGHT, 0.0, 0.0));
+    float depth = texelFetch(depthTex, ivec2(gl_GlobalInvocationID.xy), 0).x;
+    vec3 albedo = texelFetch(albedoMetallicTex, ivec2(gl_GlobalInvocationID.xy), 0).rgb;
+    vec3 normal = (texelFetch(normalRoughnessTex, ivec2(gl_GlobalInvocationID.xy), 0).xyz * 2.0) - 1.0;
+    float metallic = texelFetch(albedoMetallicTex, ivec2(gl_GlobalInvocationID.xy), 0).a;
+    float roughness = texelFetch(normalRoughnessTex, ivec2(gl_GlobalInvocationID.xy), 0).a;
+    
+    vec2 uv = (gl_GlobalInvocationID.xy + 0.5) * vec2(1.0 / WINDOW_WIDTH, 1.0 / WINDOW_HEIGHT);
+    vec4 clip = vec4(uv * 2.0 - 1.0, depth, 1.0);
+    vec4 worldPos = inverse(proj * view) * clip;
+    worldPos /= worldPos.w;
+
+    vec3 viewDir = normalize(viewPos - worldPos.xyz);
+    if (depth == 1.0)
+    {
+        vec3 col = vec3(0.14, 0.42, 0.53) + vec3(clamp(-viewDir.y * 0.72, -0.2, 1.0));
+        imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(col, 1.0));
+        return;
+    }
+
+    vec3 lightDir = normalize(vec3(-1.0, -1.0, 0.0));
+    vec3 lightCol = vec3(1.0, 1.0, 1.0);
+
+    // specular
+    vec3 h = normalize(viewDir + lightDir);
+    float nDotV = abs(dot(normal, viewDir)) + 1e-5;
+    float nDotL = clamp(dot(normal, lightDir), 0.0, 1.0);
+    float nDotH = clamp(dot(normal, h), 0.0, 1.0);
+    float lDotH = clamp(dot(lightDir, h), 0.0, 1.0);
+
+    vec3 f0 = 0.16 * 0.04 * 0.04 * (1.0 - metallic) + albedo * metallic;
+
+    float D = D_GGX(nDotH, roughness);
+    vec3 F = F_Schlick(lDotH, f0);
+    float G = V_SmithGGXCorrelated(nDotV, nDotL, roughness);
+
+    vec3 specular = D * F * G * clamp(dot(normal, lightDir), 0.0, 1.0) * lightCol;
+
+    // diffuse
+    vec3 diffuse = (((1.0 - metallic) * albedo) / PI) * clamp(dot(normal, lightDir), 0.0, 1.0) * lightCol;
+
+    vec3 col = diffuse + specular + 0.1 * vec3(0.14, 0.42, 0.53) * albedo;
+    col /= (1.0 + col);
+    imageStore(img, ivec2(gl_GlobalInvocationID.xy), vec4(col, 1.0));
 }
