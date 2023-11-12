@@ -149,6 +149,7 @@
     <ClCompile Include="lighting.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="renderer.cpp" />
+    <ClCompile Include="scene.cpp" />
     <ClCompile Include="vk_graphics.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -167,6 +168,7 @@
     <ClInclude Include="renderer.h" />
     <ClInclude Include="gbuffer.h" />
     <ClInclude Include="json.hpp" />
+    <ClInclude Include="scene.h" />
     <ClInclude Include="vk_graphics.h" />
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="stb_image_write.h" />

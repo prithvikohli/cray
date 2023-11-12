@@ -32,7 +32,7 @@ void GBufferPass::createRenderPass()
 
     VkAttachmentDescription albedoMetallicAttachment = depthAttachment;
     albedoMetallicAttachment.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    albedoMetallicAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     VkAttachmentDescription normalRoughnessAttachment = albedoMetallicAttachment;
     VkAttachmentDescription emissiveAttachment = albedoMetallicAttachment;
@@ -138,13 +138,13 @@ void GBufferPass::createPipeline()
     vertexBindingPosition.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
     vertexBindingPosition.stride = 12u;
     VkVertexInputBindingDescription vertexBindingNormal{};
-    vertexBindingPosition.binding = 1u;
-    vertexBindingPosition.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    vertexBindingPosition.stride = 12u;
+    vertexBindingNormal.binding = 1u;
+    vertexBindingNormal.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    vertexBindingNormal.stride = 12u;
     VkVertexInputBindingDescription vertexBindingTexCoord{};
-    vertexBindingPosition.binding = 2u;
-    vertexBindingPosition.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    vertexBindingPosition.stride = 12u;
+    vertexBindingTexCoord.binding = 2u;
+    vertexBindingTexCoord.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    vertexBindingTexCoord.stride = 12u;
     VkVertexInputBindingDescription vertexBindings[] = { vertexBindingPosition, vertexBindingNormal, vertexBindingTexCoord };
 
     VkVertexInputAttributeDescription vertexAttributePosition{};
@@ -152,13 +152,13 @@ void GBufferPass::createPipeline()
     vertexAttributePosition.binding = 0u;
     vertexAttributePosition.format = VK_FORMAT_R32G32B32_SFLOAT;
     VkVertexInputAttributeDescription vertexAttributeNormal{};
-    vertexAttributePosition.location = 1u;
-    vertexAttributePosition.binding = 1u;
-    vertexAttributePosition.format = VK_FORMAT_R32G32B32_SFLOAT;
+    vertexAttributeNormal.location = 1u;
+    vertexAttributeNormal.binding = 1u;
+    vertexAttributeNormal.format = VK_FORMAT_R32G32B32_SFLOAT;
     VkVertexInputAttributeDescription vertexAttributeTexCoord{};
-    vertexAttributePosition.location = 2u;
-    vertexAttributePosition.binding = 2u;
-    vertexAttributePosition.format = VK_FORMAT_R32G32_SFLOAT;
+    vertexAttributeTexCoord.location = 2u;
+    vertexAttributeTexCoord.binding = 2u;
+    vertexAttributeTexCoord.format = VK_FORMAT_R32G32_SFLOAT;
     VkVertexInputAttributeDescription vertexAttributes[] = { vertexAttributePosition, vertexAttributeNormal, vertexAttributeTexCoord };
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};

@@ -12,6 +12,7 @@
 #include "vk_mem_alloc.h"
 
 #define LOG(msg) std::cout << msg << std::endl
+#define LOGE(msg) std::cerr << msg << std::endl
 #define VK_CHECK(func, err) if (func != VK_SUCCESS) throw std::runtime_error(err)
 
 namespace vk
@@ -100,9 +101,13 @@ public:
     void submitToQueue(VkSubmitInfo submitInfo, VkFence fence) const;
     void present(uint32_t swapIdx, VkSemaphore waitSemaphore) const;
     void waitIdle() const { VK_CHECK(vkDeviceWaitIdle(m_device), "device failed to wait idle!"); }
-
+    
+    std::shared_ptr<Buffer> createBuffer(VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const;
     std::shared_ptr<Image> createImage(VkImageCreateInfo imageInfo, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const;
     std::shared_ptr<ImageView> createImageView(const vk::Image& image, VkImageViewType viewType, VkImageSubresourceRange subRange) const;
+
+    void copyBuffer(const Buffer& src, const Buffer& dst) const;
+    void copyImage(const Image& src, const Image& dst) const;
 
     RenderContext& operator=(const RenderContext&) = delete;
 
@@ -116,6 +121,7 @@ private:
     VkDevice m_device;
     VkQueue m_queue;
     VkCommandPool m_cmdPool;
+    VkCommandPool m_cmdPoolTransient;
     VkCommandBuffer m_cmdBuf;
     VkSwapchainKHR m_swapchain;
     std::vector<VkImage> m_swapchainImages;

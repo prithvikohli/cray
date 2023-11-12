@@ -18,6 +18,8 @@ int main()
     vk::RenderContext rc(window);
     Renderer renderer(&rc, "shaders/");
 
+    renderer.loadScene("AntiqueCamera.glb");
+
     while (!glfwWindowShouldClose(window))
     {
         glfwPollEvents();

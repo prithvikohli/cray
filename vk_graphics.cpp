@@ -44,6 +44,7 @@ RenderContext::~RenderContext()
     //    vkDestroyImageView(m_device, view, nullptr);
     vkDestroySwapchainKHR(m_device, m_swapchain, nullptr);
     vkDestroyCommandPool(m_device, m_cmdPool, nullptr);
+    vkDestroyCommandPool(m_device, m_cmdPoolTransient, nullptr);
     vkDestroyDevice(m_device, nullptr);
     vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
     vkDestroyInstance(m_instance, nullptr);
@@ -162,6 +163,10 @@ void RenderContext::createCommandBuffer()
     allocInfo.commandBufferCount = 1u;
 
     VK_CHECK(vkAllocateCommandBuffers(m_device, &allocInfo, &m_cmdBuf), "failed to allocate command buffer!");
+
+    // also create command pool to allocate short-lived command buffers for transferring staging buffers/images to GPU
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    VK_CHECK(vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_cmdPoolTransient), "failed to create transient command pool!");
 }
 
 void RenderContext::createSwapchain()
@@ -246,6 +251,12 @@ void RenderContext::present(uint32_t swapIdx, VkSemaphore waitSemaphore) const
     VK_CHECK(vkQueuePresentKHR(m_queue, &presentInfo), "failed to present swapchain!");
 }
 
+std::shared_ptr<Buffer> RenderContext::createBuffer(VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const
+{
+    std::shared_ptr<Buffer> buf = std::make_shared<Buffer>(m_allocator, size, bufferUsage, memoryUsage, allocFlags, memoryFlags);
+    return buf;
+}
+
 std::shared_ptr<Image> RenderContext::createImage(VkImageCreateInfo imageInfo, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const
 {
     std::shared_ptr<Image> img = std::make_shared<Image>(m_allocator, imageInfo, memoryUsage, allocFlags, memoryFlags);
@@ -256,6 +267,122 @@ std::shared_ptr<ImageView> RenderContext::createImageView(const vk::Image& image
 {
     std::shared_ptr<ImageView> view = std::make_shared<ImageView>(m_device, image, viewType, subRange);
     return view;
+}
+
+void RenderContext::copyBuffer(const Buffer& src, const Buffer& dst) const
+{
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = m_cmdPoolTransient;
+    allocInfo.commandBufferCount = 1u;
+
+    VkCommandBuffer cmd;
+    VK_CHECK(vkAllocateCommandBuffers(m_device, &allocInfo, &cmd), "failed to allocate copy command buffer!");
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "failed to begin copy command buffer!");
+
+    // TODO this is a bit sketchy
+    VkBufferCopy copy{};
+    copy.srcOffset = 0u;
+    copy.dstOffset = 0u;
+    copy.size = src.m_size;
+
+    vkCmdCopyBuffer(cmd, src, dst, 1u, &copy);
+    VK_CHECK(vkEndCommandBuffer(cmd), "failed to end copy command buffer!");
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1u;
+    submitInfo.pCommandBuffers = &cmd;
+
+    VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    VkFence fence;
+    VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &fence), "failed to create copy fence!");
+
+    VK_CHECK(vkQueueSubmit(m_queue, 1u, &submitInfo, fence), "failed to submit copy to queue!");
+    VK_CHECK(vkWaitForFences(m_device, 1u, &fence, VK_TRUE, UINT64_MAX), "failed to wait for copy fence!");
+
+    vkDestroyFence(m_device, fence, nullptr);
+    vkFreeCommandBuffers(m_device, m_cmdPoolTransient, 1u, &cmd);
+}
+
+void RenderContext::copyImage(const Image& src, const Image& dst) const
+{
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = m_cmdPoolTransient;
+    allocInfo.commandBufferCount = 1u;
+
+    VkCommandBuffer cmd;
+    VK_CHECK(vkAllocateCommandBuffers(m_device, &allocInfo, &cmd), "failed to allocate copy command buffer!");
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "failed to begin copy command buffer!");
+
+    // TODO don't hardcode this
+    VkImageSubresourceRange subRange{};
+    subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    subRange.baseArrayLayer = 0u;
+    subRange.baseMipLevel = 0u;
+    subRange.layerCount = src.m_imageInfo.arrayLayers;
+    subRange.levelCount = src.m_imageInfo.mipLevels;
+    VkImageMemoryBarrier imageMemoryBarrier{};
+    imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    imageMemoryBarrier.srcAccessMask = 0u;
+    imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    imageMemoryBarrier.image = src;
+    imageMemoryBarrier.subresourceRange = subRange;
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+
+    subRange.layerCount = dst.m_imageInfo.arrayLayers;
+    subRange.levelCount = dst.m_imageInfo.mipLevels;
+    imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    imageMemoryBarrier.image = dst;
+
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+
+    // TODO don't hardcode this
+    VkImageSubresourceLayers subLayers{};
+    subLayers.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    subLayers.baseArrayLayer = 0u;
+    subLayers.layerCount = src.m_imageInfo.arrayLayers;
+    subLayers.mipLevel = 0u;
+    VkImageCopy copy{};
+    copy.srcOffset = { 0, 0, 0 };
+    copy.dstOffset = { 0, 0, 0 };
+    copy.extent = src.m_imageInfo.extent;
+    copy.srcSubresource = subLayers;
+    copy.dstSubresource = subLayers;
+
+    vkCmdCopyImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &copy);
+    VK_CHECK(vkEndCommandBuffer(cmd), "failed to end copy command buffer!");
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1u;
+    submitInfo.pCommandBuffers = &cmd;
+
+    VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    VkFence fence;
+    VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &fence), "failed to create copy fence!");
+
+    VK_CHECK(vkQueueSubmit(m_queue, 1u, &submitInfo, fence), "failed to submit copy to queue!");
+    VK_CHECK(vkWaitForFences(m_device, 1u, &fence, VK_TRUE, UINT64_MAX), "failed to wait for copy fence!");
+
+    vkDestroyFence(m_device, fence, nullptr);
+    vkFreeCommandBuffers(m_device, m_cmdPoolTransient, 1u, &cmd);
 }
 
 Buffer::Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) : m_allocator(allocator), m_size(size)

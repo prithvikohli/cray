@@ -4,33 +4,83 @@
 
 Renderer::Renderer(vk::RenderContext* rc, const std::string& shadersDir) : m_rc(rc), m_device(rc->getDevice()), m_cmdBuf(rc->getCommandBuffer())
 {
+    // create GBuffer pass
+    std::vector<uint32_t> vertCode = readShader(shadersDir + "gbuffer.vert.spv");
+    std::vector<uint32_t> fragCode = readShader(shadersDir + "gbuffer.frag.spv");
+    m_gbufferPass = std::make_unique<GBufferPass>(m_rc, vertCode, fragCode);
+
+    {
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.format = VK_FORMAT_D32_SFLOAT;
+        imageInfo.extent = { m_rc->m_extent.width, m_rc->m_extent.height, 1u };
+        imageInfo.mipLevels = 1u;
+        imageInfo.arrayLayers = 1u;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+        m_depthImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+
+        imageInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+
+        m_albedoMetallicImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m_normalRoughnessImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m_emissiveImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+
+        VkImageSubresourceRange subRange{};
+        subRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        subRange.baseArrayLayer = 0u;
+        subRange.baseMipLevel = 0u;
+        subRange.layerCount = 1u;
+        subRange.levelCount = 1u;
+
+        m_gbuffer.depth = m_rc->createImageView(*m_depthImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
+
+        subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+        m_gbuffer.albedoMetallic = m_rc->createImageView(*m_albedoMetallicImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
+        m_gbuffer.normalRoughness = m_rc->createImageView(*m_normalRoughnessImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
+        m_gbuffer.emissive = m_rc->createImageView(*m_emissiveImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
+    }
+
+    m_gbufferPass->bindBundle(m_gbuffer);
+
+    // create lighting pass
     std::vector<uint32_t> lightingCode = readShader(shadersDir + "lighting.comp.spv");
     m_lightingPass = std::make_unique<LightingPass>(m_rc, lightingCode);
 
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    imageInfo.extent = { m_rc->m_extent.width, m_rc->m_extent.height, 1u };
-    imageInfo.mipLevels = 1u;
-    imageInfo.arrayLayers = 1u;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    {
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        imageInfo.imageType = VK_IMAGE_TYPE_2D;
+        imageInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        imageInfo.extent = { m_rc->m_extent.width, m_rc->m_extent.height, 1u };
+        imageInfo.mipLevels = 1u;
+        imageInfo.arrayLayers = 1u;
+        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-    m_lightingImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m_lightingImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
 
-    VkImageSubresourceRange subRange{};
-    subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    subRange.baseArrayLayer = 0u;
-    subRange.baseMipLevel = 0u;
-    subRange.layerCount = 1u;
-    subRange.levelCount = 1u;
+        VkImageSubresourceRange subRange{};
+        subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        subRange.baseArrayLayer = 0u;
+        subRange.baseMipLevel = 0u;
+        subRange.layerCount = 1u;
+        subRange.levelCount = 1u;
 
-    m_lightingView = m_rc->createImageView(*m_lightingImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
+        m_lightingView = m_rc->createImageView(*m_lightingImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
+    }
 
+    // create other objects owned by renderer
     createSyncObjects();
     createDescriptorSet();
 }
@@ -58,6 +108,7 @@ void Renderer::createSyncObjects()
 
 void Renderer::createDescriptorSet()
 {
+    // create descriptor set for lighting pass
     VkDescriptorPoolSize poolSize{};
     poolSize.descriptorCount = 1u;
     poolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -92,6 +143,11 @@ void Renderer::createDescriptorSet()
     vkUpdateDescriptorSets(m_device, 1u, &writeSet, 0u, nullptr);
 }
 
+void Renderer::loadScene(const std::string& gltfBinaryFilename)
+{
+    m_scene = std::make_unique<Scene>(m_rc, gltfBinaryFilename);
+}
+
 void Renderer::render() const
 {
     VK_CHECK(vkWaitForFences(m_device, 1u, &m_inFlightFence, VK_TRUE, UINT64_MAX), "renderer failed to wait for in flight fence!");
@@ -105,6 +161,11 @@ void Renderer::render() const
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(m_cmdBuf, &beginInfo), "renderer failed to begin command buffer!");
 
+    // gbuffer pass
+    m_gbufferPass->begin(m_cmdBuf);
+    m_gbufferPass->end(m_cmdBuf);
+
+    // lighting pass
     m_lightingPass->bindPipeline(m_cmdBuf);
     vkCmdBindDescriptorSets(m_cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_lightingPass->getPipelineLayout(), 0u, 1u, &m_descriptorSet, 0u, nullptr);
 
