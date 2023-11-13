@@ -23,6 +23,7 @@ struct MaterialViews
     std::shared_ptr<vk::ImageView> albedo;
     std::shared_ptr<vk::ImageView> metallicRoughness;
     std::shared_ptr<vk::ImageView> normal;
+    std::shared_ptr<vk::ImageView> emissive;
 };
 
 class DrawableNode
@@ -43,9 +44,10 @@ private:
 
 struct LightingUniforms
 {
-    glm::mat4 view;
-    glm::mat4 proj;
-    glm::vec3 camPos;
+    glm::mat4 invViewProj;
+    glm::vec3 viewPos;
+    uint32_t pad;
+    glm::vec2 invRes;
 };
 
 class Renderer
@@ -55,7 +57,7 @@ public:
     
     ~Renderer();
 
-    void loadScene(const std::string& gltfBinaryFilename);
+    void loadScene(const std::string& gltfFilename, bool binary = false);
     void render() const;
 
     Camera m_camera;

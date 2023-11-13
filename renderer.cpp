@@ -52,7 +52,19 @@ DrawableNode::DrawableNode(Node* node, VkDevice device, VkPipelineLayout layout,
     writeNormal.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writeNormal.pImageInfo = &normalInfo;
 
-    VkWriteDescriptorSet writes[] = { writeUniforms, writeAlbedo, writeMetallicRoughness, writeNormal };
+    VkDescriptorImageInfo emissiveInfo{};
+    emissiveInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    emissiveInfo.imageView = *m_matViews.emissive;
+    emissiveInfo.sampler = sampler;
+    VkWriteDescriptorSet writeEmissive{};
+    writeEmissive.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeEmissive.dstSet = m_descriptorSet;
+    writeEmissive.dstBinding = 4u;
+    writeEmissive.descriptorCount = 1u;
+    writeEmissive.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writeEmissive.pImageInfo = &emissiveInfo;
+
+    VkWriteDescriptorSet writes[] = { writeUniforms, writeAlbedo, writeMetallicRoughness, writeNormal, writeEmissive };
     vkUpdateDescriptorSets(device, ARRAY_LENGTH(writes), writes, 0u, nullptr);
 }
 
@@ -74,6 +86,7 @@ void DrawableNode::draw(VkCommandBuffer cmd) const
     VkBuffer buffers[] = { m_node->mesh->positionBuffer->getHandle(), m_node->mesh->normalBuffer->getHandle(), m_node->mesh->texCoordBuffer->getHandle() };
     VkDeviceSize offsets[] = { 0u, 0u, 0u };
     vkCmdBindVertexBuffers(cmd, 0u, ARRAY_LENGTH(buffers), buffers, offsets);
+    // TODO different index data types
     vkCmdBindIndexBuffer(cmd, *m_node->mesh->indexBuffer, 0u, VK_INDEX_TYPE_UINT16);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_layout, 0u, 1u, &m_descriptorSet, 0u, nullptr);
     vkCmdDrawIndexed(cmd, m_node->mesh->indexCount, 1u, 0u, 0u, 0u);
@@ -202,7 +215,7 @@ void Renderer::createLightingDescriptorSet()
     outputSize.descriptorCount = 1u;
     outputSize.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     VkDescriptorPoolSize inputSize{};
-    inputSize.descriptorCount = 3u;
+    inputSize.descriptorCount = 4u;
     inputSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     VkDescriptorPoolSize uniformsSize{};
     uniformsSize.descriptorCount = 1u;
@@ -285,7 +298,19 @@ void Renderer::createLightingDescriptorSet()
     writeUniforms.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     writeUniforms.pBufferInfo = &uniformsInfo;
 
-    VkWriteDescriptorSet writes[] = { writeOutput, writeDepth, writeAlbedoMetallic, writeNormalRoughness, writeUniforms };
+    VkDescriptorImageInfo emissiveInfo{};
+    emissiveInfo.imageView = *m_gbuffer.emissive;
+    emissiveInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    emissiveInfo.sampler = m_samplerNearest;
+    VkWriteDescriptorSet writeEmissive{};
+    writeEmissive.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeEmissive.dstSet = m_descriptorSetLighting;
+    writeEmissive.dstBinding = 5u;
+    writeEmissive.descriptorCount = 1u;
+    writeEmissive.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writeEmissive.pImageInfo = &emissiveInfo;
+
+    VkWriteDescriptorSet writes[] = { writeOutput, writeDepth, writeAlbedoMetallic, writeNormalRoughness, writeUniforms, writeEmissive };
     vkUpdateDescriptorSets(m_device, ARRAY_LENGTH(writes), writes, 0u, nullptr);
 }
 
@@ -327,6 +352,7 @@ DrawableNode Renderer::createDrawableNode(Node* node) const
     matViews.albedo = m_rc->createImageView(*node->mesh->material->albedo, VK_IMAGE_VIEW_TYPE_2D, subRange);
     matViews.metallicRoughness = m_rc->createImageView(*node->mesh->material->metallicRoughness, VK_IMAGE_VIEW_TYPE_2D, subRange);
     matViews.normal = m_rc->createImageView(*node->mesh->material->normal, VK_IMAGE_VIEW_TYPE_2D, subRange);
+    matViews.emissive = m_rc->createImageView(*node->mesh->material->emissive, VK_IMAGE_VIEW_TYPE_2D, subRange);
 
     // allocate descriptor set
     VkDescriptorSetLayout layout = m_gbufferPass->getDescriptorSetLayout();
@@ -342,9 +368,9 @@ DrawableNode Renderer::createDrawableNode(Node* node) const
     return DrawableNode(node, m_device, m_gbufferPass->getPipelineLayout(), descriptorSet, uniformsBuffer, matViews, m_samplerLinear);
 }
 
-void Renderer::loadScene(const std::string& gltfBinaryFilename)
+void Renderer::loadScene(const std::string& gltfFilename, bool binary)
 {
-    m_scene = std::make_unique<Scene>(m_rc, gltfBinaryFilename);
+    m_scene = std::make_unique<Scene>(m_rc, gltfFilename, binary);
     if (m_descriptorPoolDrawables != VK_NULL_HANDLE)
         vkDestroyDescriptorPool(m_device, m_descriptorPoolDrawables, nullptr);
 
@@ -353,7 +379,7 @@ void Renderer::loadScene(const std::string& gltfBinaryFilename)
     uniformsSize.descriptorCount = m_scene->m_nodes.size();
     uniformsSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     VkDescriptorPoolSize texturesSize{};
-    texturesSize.descriptorCount = 3u * m_scene->m_nodes.size();
+    texturesSize.descriptorCount = 4u * m_scene->m_nodes.size();
     texturesSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 
     VkDescriptorPoolSize poolSizes[] = { uniformsSize, texturesSize };
@@ -399,9 +425,9 @@ void Renderer::render() const
 
     // update lighting uniforms
     LightingUniforms lu;
-    lu.camPos = m_camera.pos;
-    lu.view = m_camera.view;
-    lu.proj = m_camera.proj;
+    lu.viewPos = m_camera.pos;
+    lu.invViewProj = glm::inverse(m_camera.proj * m_camera.view);
+    lu.invRes = glm::vec2(1.0f / m_rc->m_extent.width, 1.0f / m_rc->m_extent.height);
     void* data = m_lightingUniforms->map();
     memcpy(data, &lu, sizeof(LightingUniforms));
     m_lightingUniforms->unmap();

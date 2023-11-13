@@ -99,8 +99,10 @@ void GBufferPass::createLayouts()
     metallicRoughnessBinding.binding = 2u;
     VkDescriptorSetLayoutBinding normalBinding = albedoBinding;
     normalBinding.binding = 3u;
+    VkDescriptorSetLayoutBinding emissiveBinding = albedoBinding;
+    emissiveBinding.binding = 4u;
 
-    VkDescriptorSetLayoutBinding bindings[] = { uniformsBinding, albedoBinding, metallicRoughnessBinding, normalBinding };
+    VkDescriptorSetLayoutBinding bindings[] = { uniformsBinding, albedoBinding, metallicRoughnessBinding, normalBinding, emissiveBinding };
     VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{};
     descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     descriptorSetLayoutInfo.bindingCount = ARRAY_LENGTH(bindings);

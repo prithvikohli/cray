@@ -57,7 +57,13 @@ void LightingPass::createLayouts()
     uniformsBinding.descriptorCount = 1u;
     uniformsBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-    VkDescriptorSetLayoutBinding bindings[] = { outputBinding, depthBinding, albedoMetallicBinding, normalRoughnessBinding, uniformsBinding };
+    VkDescriptorSetLayoutBinding emissiveBinding{};
+    emissiveBinding.binding = 5u;
+    emissiveBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    emissiveBinding.descriptorCount = 1u;
+    emissiveBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutBinding bindings[] = { outputBinding, depthBinding, albedoMetallicBinding, normalRoughnessBinding, uniformsBinding, emissiveBinding };
     VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{};
     descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     descriptorSetLayoutInfo.bindingCount = ARRAY_LENGTH(bindings);

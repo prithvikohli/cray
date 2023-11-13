@@ -5,14 +5,18 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "tiny_gltf.h"
 
-Scene::Scene(vk::RenderContext* rc, const std::string& gltfBinaryFilename) : m_rc(rc)
+Scene::Scene(vk::RenderContext* rc, const std::string& gltfFilename, bool binary) : m_rc(rc)
 {
     // parse file
     tinygltf::Model model;
     tinygltf::TinyGLTF loader;
     std::string warn;
     std::string err;
-    bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, gltfBinaryFilename);
+    bool ret;
+    if (binary)
+        ret = loader.LoadBinaryFromFile(&model, &err, &warn, gltfFilename);
+    else
+        ret = loader.LoadASCIIFromFile(&model, &err, &warn, gltfFilename);
     if (!warn.empty())
         LOG(warn);
     if (!err.empty())
@@ -51,13 +55,13 @@ void Scene::createMaterial(tinygltf::Model& model, tinygltf::Material& material)
     tinygltf::Texture& albedoTex = model.textures[material.pbrMetallicRoughness.baseColorTexture.index];
     tinygltf::Texture& metallicRoughnessTex = model.textures[material.pbrMetallicRoughness.metallicRoughnessTexture.index];
     tinygltf::Texture& normalTex = model.textures[material.normalTexture.index];
-    //tinygltf::Texture& emissiveTex = model.textures[material.emissiveTexture.index];
+    tinygltf::Texture& emissiveTex = model.textures[material.emissiveTexture.index];
 
     // TODO buffer views
     tinygltf::Image& albedoImg = model.images[albedoTex.source];
     tinygltf::Image& metallicRoughnessImg = model.images[metallicRoughnessTex.source];
     tinygltf::Image& normalImg = model.images[normalTex.source];
-    //tinygltf::Image& emissiveImg = model.images[emissiveTex.source];
+    tinygltf::Image& emissiveImg = model.images[emissiveTex.source];
 
     Material mat;
 
@@ -124,20 +128,18 @@ void Scene::createMaterial(tinygltf::Model& model, tinygltf::Material& material)
         m_rc->copyImage(*stagingImg, *mat.normal);
     }
 
-    // TODO emissive
+    {
+        stagingImageInfo.extent = { static_cast<uint32_t>(emissiveImg.width), static_cast<uint32_t>(emissiveImg.height), 1u };
+        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(stagingImageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        void* data = stagingImg->map();
+        memcpy(data, emissiveImg.image.data(), emissiveImg.image.size());
+        stagingImg->unmap();
 
-    //{
-    //    stagingImageInfo.extent = { static_cast<uint32_t>(emissiveImg.width), static_cast<uint32_t>(emissiveImg.height), 1u };
-    //    std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(stagingImageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    //    void* data = stagingImg->map();
-    //    memcpy(data, emissiveImg.image.data(), emissiveImg.image.size());
-    //    stagingImg->unmap();
+        imageInfo.extent = stagingImageInfo.extent;
+        mat.emissive = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
 
-    //    imageInfo.extent = stagingImageInfo.extent;
-    //    mat.emissive = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-
-    //    m_rc->copyImage(*stagingImg, *mat.emissive);
-    //}
+        m_rc->copyImage(*stagingImg, *mat.emissive);
+    }
 
     m_materials.push_back(mat);
 }

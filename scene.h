@@ -14,7 +14,7 @@ struct Material
     std::shared_ptr<vk::Image> albedo;
     std::shared_ptr<vk::Image> metallicRoughness;
     std::shared_ptr<vk::Image> normal;
-    //std::shared_ptr<vk::Image> emissive;
+    std::shared_ptr<vk::Image> emissive;
 };
 
 struct Mesh
@@ -39,7 +39,7 @@ struct Node
 class Scene
 {
 public:
-    Scene(vk::RenderContext* rc, const std::string& gltfBinaryFilename);
+    Scene(vk::RenderContext* rc, const std::string& gltfFilename, bool binary = false);
     Scene(const Scene&) = delete;
 
     ~Scene();

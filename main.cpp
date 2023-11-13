@@ -5,7 +5,7 @@
 
 glm::vec3 cameraPos = glm::vec3(0.0f, 0.0f, 3.0f);
 glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.0f);
-glm::vec3 cameraUp = glm::vec3(0.0f, -1.0f, 0.0f);
+glm::vec3 cameraUp = glm::vec3(0.0f, 1.0f, 0.0f);
 
 double lastX = WINDOW_WIDTH / 2;
 double lastY = WINDOW_HEIGHT / 2;
@@ -23,8 +23,8 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos)
         firstMouse = false;
     }
 
-    float xoffset = -(xpos - lastX);
-    float yoffset = -(lastY - ypos);
+    float xoffset = xpos - lastX;
+    float yoffset = lastY - ypos;
     lastX = xpos;
     lastY = ypos;
 
@@ -62,7 +62,9 @@ int main()
     vk::RenderContext rc(window);
     Renderer renderer(&rc, "shaders/");
 
-    renderer.loadScene("AntiqueCamera.glb");
+    //renderer.loadScene("AntiqueCamera.glb", true);
+    //renderer.loadScene("FlightHelmet/FlightHelmet.gltf");
+    renderer.loadScene("DamagedHelmet.glb", true);
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     glfwSetCursorPosCallback(window, mouse_callback);

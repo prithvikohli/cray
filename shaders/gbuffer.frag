@@ -7,10 +7,12 @@ layout(location = 2) in vec2 texCoord;
 
 layout(location = 0) out vec4 albedoMetallicOut;
 layout(location = 1) out vec4 normalRoughnessOut;
+layout(location = 2) out vec4 emissiveOut;
 
 layout(set = 0, binding = 1) uniform sampler2D albedo;
 layout(set = 0, binding = 2) uniform sampler2D metallicRoughness;
 layout(set = 0, binding = 3) uniform sampler2D normalMap;
+layout(set = 0, binding = 4) uniform sampler2D emissive;
 
 void main() 
 {
@@ -31,4 +33,6 @@ void main()
 
     normalRoughnessOut.rgb = (n + 1.0) * 0.5;
     normalRoughnessOut.a = texture(metallicRoughness, texCoord).g;
+
+    emissiveOut = texture(emissive, texCoord);
 }
