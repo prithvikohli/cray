@@ -1,15 +1,16 @@
 #version 460
+
 #extension GL_KHR_vulkan_glsl : enable
 
 layout(location = 0) in vec3 position;
-layout(location = 1) in vec3 normalIn;
+layout(location = 1) in vec3 normal;
 layout(location = 2) in vec2 texCoord;
 
 layout(location = 0) out vec3 positionOut;
 layout(location = 1) out vec3 normalOut;
 layout(location = 2) out vec2 texCoordOut;
 
-layout(binding = 0) uniform Uniforms 
+layout(set = 0, binding = 0, std140) uniform Uniforms 
 {
     mat4 model;
     mat4 view;
@@ -22,6 +23,6 @@ void main()
     gl_Position = proj * view * worldPos;
 
     positionOut = worldPos.xyz;
-    normalOut = normalize(transpose(inverse(mat3(model))) * normalIn);
+    normalOut = transpose(inverse(mat3(model))) * normal;
     texCoordOut = texCoord;
 }

@@ -62,8 +62,6 @@ int main()
     vk::RenderContext rc(window);
     Renderer renderer(&rc, "shaders/");
 
-    //renderer.loadScene("AntiqueCamera.glb", true);
-    //renderer.loadScene("FlightHelmet/FlightHelmet.gltf");
     renderer.loadScene("DamagedHelmet.glb", true);
 
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
