@@ -3,6 +3,8 @@
 
 #include "vk_graphics.h"
 
+#include "scene.h"
+
 #ifndef NDEBUG
 #define ENABLED_LAYER_COUNT 1u
 static const char* ENABLED_LAYER_NAMES[] = { "VK_LAYER_KHRONOS_validation" };
@@ -31,6 +33,7 @@ RenderContext::RenderContext(GLFWwindow* window)
     allocatorInfo.device = m_device;
     allocatorInfo.physicalDevice = m_physicalDevice;
     allocatorInfo.instance = m_instance;
+    allocatorInfo.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
 
     VK_CHECK(vmaCreateAllocator(&allocatorInfo, &m_allocator), "failed to create VMA allocator!");
 }
@@ -100,6 +103,12 @@ void RenderContext::getPhysicalDevice()
         throw std::runtime_error("failed to find appropriate GPU!");
 
     m_physicalDevice = physicalDevices[physicalDeviceIdx];
+
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR ASProps{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_PROPERTIES_KHR };
+    VkPhysicalDeviceProperties2 props{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+    props.pNext = &ASProps;
+    vkGetPhysicalDeviceProperties2(m_physicalDevice, &props);
+    m_ASProperties = std::move(ASProps);
 }
 
 void RenderContext::chooseGctPresentQueue()
@@ -133,12 +142,27 @@ void RenderContext::createDeviceAndQueue()
     queueInfo.queueCount = 1u;
     queueInfo.pQueuePriorities = &queuePriority;
 
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR ASFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
+    ASFeatures.accelerationStructure = VK_TRUE;
+
+    VkPhysicalDeviceBufferDeviceAddressFeatures bufferAddrFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES };
+    bufferAddrFeatures.bufferDeviceAddress = VK_TRUE;
+    bufferAddrFeatures.pNext = &ASFeatures;
+
+    VkPhysicalDeviceRayQueryFeaturesKHR RQFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
+    RQFeatures.rayQuery = VK_TRUE;
+    RQFeatures.pNext = &bufferAddrFeatures;
+
+    VkPhysicalDeviceFeatures2 deviceFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+    deviceFeatures.pNext = &RQFeatures;
+
     VkDeviceCreateInfo deviceInfo{};
     deviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     deviceInfo.queueCreateInfoCount = 1u;
     deviceInfo.pQueueCreateInfos = &queueInfo;
     deviceInfo.enabledExtensionCount = ENABLED_DEVICE_EXTENSION_COUNT;
     deviceInfo.ppEnabledExtensionNames = ENABLED_DEVICE_EXTENSION_NAMES;
+    deviceInfo.pNext = &deviceFeatures;
 
     VK_CHECK(vkCreateDevice(m_physicalDevice, &deviceInfo, nullptr, &m_device), "failed to create device!");
     vkGetDeviceQueue(m_device, m_queueFamilyIdx, 0u, &m_queue);
@@ -221,6 +245,12 @@ void RenderContext::present(uint32_t swapIdx, VkSemaphore waitSemaphore) const
 std::shared_ptr<Buffer> RenderContext::createBuffer(VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const
 {
     std::shared_ptr<Buffer> buf = std::make_shared<Buffer>(m_allocator, size, bufferUsage, memoryUsage, allocFlags, memoryFlags);
+    return buf;
+}
+
+std::shared_ptr<AlignedBuffer> RenderContext::createAlignedBuffer(VkDeviceSize size, VkDeviceSize minAlignment, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const
+{
+    std::shared_ptr<AlignedBuffer> buf = std::make_shared<AlignedBuffer>(m_allocator, size, minAlignment, bufferUsage, memoryUsage, allocFlags, memoryFlags);
     return buf;
 }
 
@@ -361,6 +391,44 @@ void RenderContext::copyImage(const Image& src, const Image& dst) const
     vkFreeCommandBuffers(m_device, m_cmdPoolTransient, 1u, &cmd);
 }
 
+void RenderContext::buildAS(VkAccelerationStructureBuildGeometryInfoKHR buildInfo, VkAccelerationStructureBuildRangeInfoKHR* rangeInfo) const
+{
+    static PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(vkGetDeviceProcAddr(m_device, "vkCmdBuildAccelerationStructuresKHR"));
+
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandPool = m_cmdPoolTransient;
+    allocInfo.commandBufferCount = 1u;
+
+    VkCommandBuffer cmd;
+    VK_CHECK(vkAllocateCommandBuffers(m_device, &allocInfo, &cmd), "failed to allocate build AS command buffer!");
+
+    VkCommandBufferBeginInfo beginInfo{};
+    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "failed to begin build AS command buffer!");
+
+    vkCmdBuildAccelerationStructuresKHR(cmd, 1u, &buildInfo, &rangeInfo);
+
+    VK_CHECK(vkEndCommandBuffer(cmd), "failed to end build AS command buffer!");
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1u;
+    submitInfo.pCommandBuffers = &cmd;
+
+    VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    VkFence fence;
+    VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &fence), "failed to create build AS fence!");
+
+    VK_CHECK(vkQueueSubmit(m_queue, 1u, &submitInfo, fence), "failed to submit build AS to queue!");
+    VK_CHECK(vkWaitForFences(m_device, 1u, &fence, VK_TRUE, UINT64_MAX), "failed to wait for build AS fence!");
+
+    vkDestroyFence(m_device, fence, nullptr);
+    vkFreeCommandBuffers(m_device, m_cmdPoolTransient, 1u, &cmd);
+}
+
 Buffer::Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) : m_allocator(allocator), m_size(size)
 {
     VkBufferCreateInfo bufferInfo{};
@@ -400,6 +468,49 @@ VkBuffer Buffer::getHandle() const
 }
 
 Buffer::operator VkBuffer() const
+{
+    return m_handle;
+}
+
+AlignedBuffer::AlignedBuffer(VmaAllocator allocator, VkDeviceSize size, VkDeviceSize minAlignment, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) : m_allocator(allocator), m_size(size)
+{
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = m_size;
+    bufferInfo.usage = bufferUsage;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = memoryUsage;
+    allocInfo.flags = allocFlags;
+    allocInfo.requiredFlags = memoryFlags;
+
+    VK_CHECK(vmaCreateBufferWithAlignment(m_allocator, &bufferInfo, &allocInfo, minAlignment, &m_handle, &m_allocation, nullptr), "failed to create aligned VMA buffer!");
+}
+
+AlignedBuffer::~AlignedBuffer()
+{
+    vmaDestroyBuffer(m_allocator, m_handle, m_allocation);
+}
+
+void* AlignedBuffer::map() const
+{
+    void* data;
+    VK_CHECK(vmaMapMemory(m_allocator, m_allocation, &data), "failed to map aligned VMA buffer!");
+    return data;
+}
+
+void AlignedBuffer::unmap() const
+{
+    vmaUnmapMemory(m_allocator, m_allocation);
+}
+
+VkBuffer AlignedBuffer::getHandle() const
+{
+    return m_handle;
+}
+
+AlignedBuffer::operator VkBuffer() const
 {
     return m_handle;
 }

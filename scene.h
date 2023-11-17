@@ -46,15 +46,44 @@ public:
 
     Scene& operator=(const Scene&) = delete;
 
+    std::vector<Mesh> m_meshes;
     std::vector<Node*> m_nodes;
 
 private:
     vk::RenderContext* m_rc;
 
     std::vector<Material> m_materials;
-    std::vector<Mesh> m_meshes;
 
     void createMaterial(tinygltf::Model& model, tinygltf::Material& material);
     void createMesh(tinygltf::Model& model, tinygltf::Mesh& mesh);
     void createNode(tinygltf::Model& model, tinygltf::Node& node, Node* parent = nullptr);
 };
+
+namespace vk
+{
+
+class AccelerationStructure
+{
+public:
+    AccelerationStructure(RenderContext* rc, const Scene& scene);
+    AccelerationStructure(const AccelerationStructure&) = delete;
+
+    ~AccelerationStructure();
+
+    VkAccelerationStructureKHR getTlas() const { return m_tlas; }
+
+    AccelerationStructure& operator=(const AccelerationStructure&) = delete;
+
+private:
+    void buildBlases(const Scene& scene);
+    void buildTlas(const Scene& scene);
+
+    RenderContext* m_rc;
+    std::vector<std::shared_ptr<vk::Buffer>> m_blasBuffers;
+    std::map<const Mesh*, VkAccelerationStructureKHR> m_blases;
+
+    std::shared_ptr<vk::Buffer> m_tlasBuffer;
+    VkAccelerationStructureKHR m_tlas;
+};
+
+}

@@ -1,5 +1,7 @@
 #include "renderer.h"
 
+#include "stb_image.h"
+
 #include <fstream>
 
 DrawableNode::DrawableNode(Node* node, VkDevice device, VkPipelineLayout layout, VkDescriptorSet descriptorSet, std::shared_ptr<vk::Buffer> uniformsBuffer, MaterialViews matViews, VkSampler sampler) : m_node(node), m_layout(layout), m_descriptorSet(descriptorSet), m_uniformsBuffer(uniformsBuffer), m_matViews(matViews)
@@ -173,12 +175,51 @@ Renderer::Renderer(vk::RenderContext* rc, const std::string& shadersDir) : m_rc(
     // create other objects owned by renderer
     m_lightingUniforms = m_rc->createBuffer(sizeof(LightingUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
+    // load environment map
+    // TODO make configurable
+    int width = 4096;
+    int height = 2048;
+    int channels = 3;
+    float* imgData = stbi_loadf("sky.hdr", &width, &height, &channels, 4);
+
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    imageInfo.extent = { static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1u };
+    imageInfo.mipLevels = 1u;
+    imageInfo.arrayLayers = 1u;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.tiling = VK_IMAGE_TILING_LINEAR;
+    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
+
+    std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    void* data = stagingImg->map();
+    memcpy(data, imgData, width * height * 16u);
+    stagingImg->unmap();
+
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    m_envMapImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+    m_rc->copyImage(*stagingImg, *m_envMapImg);
+
+    VkImageSubresourceRange subRange{};
+    subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    subRange.baseArrayLayer = 0u;
+    subRange.baseMipLevel = 0u;
+    subRange.layerCount = 1u;
+    subRange.levelCount = 1u;
+
+    m_envMapView = m_rc->createImageView(*m_envMapImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
+
     createSamplers();
     createLightingDescriptorSet();
     createSyncObjects();
 
-    m_camera.pos = glm::vec3(0.0f);
-    m_camera.view = glm::mat4(1.0f);
     m_camera.proj = glm::perspective(glm::radians(45.0f), m_rc->m_extent.width / (float)m_rc->m_extent.height, 0.1f, 100.0f);
     m_camera.proj[1][1] *= -1;
 }
@@ -215,13 +256,16 @@ void Renderer::createLightingDescriptorSet()
     outputSize.descriptorCount = 1u;
     outputSize.type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     VkDescriptorPoolSize inputSize{};
-    inputSize.descriptorCount = 4u;
+    inputSize.descriptorCount = 5u;
     inputSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     VkDescriptorPoolSize uniformsSize{};
     uniformsSize.descriptorCount = 1u;
     uniformsSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    VkDescriptorPoolSize ASSize{};
+    ASSize.descriptorCount = 1u;
+    ASSize.type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
 
-    VkDescriptorPoolSize sizes[] = { outputSize, inputSize, uniformsSize };
+    VkDescriptorPoolSize sizes[] = { outputSize, inputSize, uniformsSize, ASSize };
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.maxSets = 1u;
@@ -310,7 +354,19 @@ void Renderer::createLightingDescriptorSet()
     writeEmissive.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     writeEmissive.pImageInfo = &emissiveInfo;
 
-    VkWriteDescriptorSet writes[] = { writeOutput, writeDepth, writeAlbedoMetallic, writeNormalRoughness, writeUniforms, writeEmissive };
+    VkDescriptorImageInfo envMapInfo{};
+    envMapInfo.imageView = *m_envMapView;
+    envMapInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    envMapInfo.sampler = m_samplerLinear;
+    VkWriteDescriptorSet writeEnvMap{};
+    writeEnvMap.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeEnvMap.dstSet = m_descriptorSetLighting;
+    writeEnvMap.dstBinding = 6u;
+    writeEnvMap.descriptorCount = 1u;
+    writeEnvMap.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writeEnvMap.pImageInfo = &envMapInfo;
+
+    VkWriteDescriptorSet writes[] = { writeOutput, writeDepth, writeAlbedoMetallic, writeNormalRoughness, writeUniforms, writeEmissive, writeEnvMap };
     vkUpdateDescriptorSets(m_device, ARRAY_LENGTH(writes), writes, 0u, nullptr);
 }
 
@@ -386,7 +442,7 @@ void Renderer::loadScene(const std::string& gltfFilename, bool binary)
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.maxSets = m_scene->m_nodes.size();
-    poolInfo.poolSizeCount = 2u;
+    poolInfo.poolSizeCount = ARRAY_LENGTH(poolSizes);
     poolInfo.pPoolSizes = poolSizes;
 
     VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPoolDrawables), "failed to create renderer drawables descriptor pool!");
@@ -396,6 +452,35 @@ void Renderer::loadScene(const std::string& gltfFilename, bool binary)
         DrawableNode dn = createDrawableNode(n);
         m_drawableNodes.push_back(dn);
     }
+
+    // TODO make configurable
+    m_camera.pos = glm::vec3(-3.0f, 1.0f, 0.0f);
+    m_camera.view = glm::lookAt(m_camera.pos, glm::vec3(0.0f, 0.0, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f));
+
+    // update lighting uniforms
+    LightingUniforms lu;
+    lu.viewPos = m_camera.pos;
+    lu.invViewProj = glm::inverse(m_camera.proj * m_camera.view);
+    lu.invRes = glm::vec2(1.0f / m_rc->m_extent.width, 1.0f / m_rc->m_extent.height);
+    void* data = m_lightingUniforms->map();
+    memcpy(data, &lu, sizeof(LightingUniforms));
+    m_lightingUniforms->unmap();
+
+    // build AS
+    m_AS = std::make_unique<vk::AccelerationStructure>(m_rc, *m_scene);
+
+    VkAccelerationStructureKHR tlas = m_AS->getTlas();
+    VkWriteDescriptorSetAccelerationStructureKHR ASInfo{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR };
+    ASInfo.accelerationStructureCount = 1u;
+    ASInfo.pAccelerationStructures = &tlas;
+    VkWriteDescriptorSet writeAS{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    writeAS.dstSet = m_descriptorSetLighting;
+    writeAS.dstBinding = 7u;
+    writeAS.descriptorCount = 1u;
+    writeAS.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    writeAS.pNext = &ASInfo;
+
+    vkUpdateDescriptorSets(m_device, 1u, &writeAS, 0u, nullptr);
 }
 
 void Renderer::render() const
@@ -422,16 +507,6 @@ void Renderer::render() const
 
     // lighting pass
     m_lightingPass->bindPipeline(m_cmdBuf);
-
-    // update lighting uniforms
-    LightingUniforms lu;
-    lu.viewPos = m_camera.pos;
-    lu.invViewProj = glm::inverse(m_camera.proj * m_camera.view);
-    lu.invRes = glm::vec2(1.0f / m_rc->m_extent.width, 1.0f / m_rc->m_extent.height);
-    void* data = m_lightingUniforms->map();
-    memcpy(data, &lu, sizeof(LightingUniforms));
-    m_lightingUniforms->unmap();
-
     vkCmdBindDescriptorSets(m_cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_lightingPass->getPipelineLayout(), 0u, 1u, &m_descriptorSetLighting, 0u, nullptr);
 
     VkImageSubresourceRange subRange{};

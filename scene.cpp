@@ -90,7 +90,7 @@ void Scene::createMaterial(tinygltf::Model& model, tinygltf::Material& material)
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     {
-        stagingImageInfo.extent = { static_cast<uint32_t>(albedoImg.width), static_cast<uint32_t>(albedoImg.height), 1u};
+        stagingImageInfo.extent = { static_cast<uint32_t>(albedoImg.width), static_cast<uint32_t>(albedoImg.height), 1u };
         std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(stagingImageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         void* data = stagingImg->map();
         memcpy(data, albedoImg.image.data(), albedoImg.image.size());
@@ -189,7 +189,7 @@ void Scene::createMesh(tinygltf::Model& model, tinygltf::Mesh& mesh)
         memcpy(data, indexBuf.data.data() + indexView.byteOffset, indexView.byteLength);
         stagingBuf->unmap();
 
-        m.indexBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(indexView.byteLength), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m.indexBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(indexView.byteLength), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
         m_rc->copyBuffer(*stagingBuf, *m.indexBuffer);
     }
 
@@ -199,7 +199,7 @@ void Scene::createMesh(tinygltf::Model& model, tinygltf::Mesh& mesh)
         memcpy(data, positionBuf.data.data() + positionView.byteOffset, positionView.byteLength);
         stagingBuf->unmap();
 
-        m.positionBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(positionView.byteLength), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m.positionBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(positionView.byteLength), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
         m_rc->copyBuffer(*stagingBuf, *m.positionBuffer);
     }
 
@@ -262,4 +262,189 @@ void Scene::createNode(tinygltf::Model& model, tinygltf::Node& node, Node* paren
         tinygltf::Node& child = model.nodes[c];
         createNode(model, child, n);
     }
+}
+
+vk::AccelerationStructure::AccelerationStructure(vk::RenderContext* rc, const Scene& scene) : m_rc(rc)
+{
+    buildBlases(scene);
+    buildTlas(scene);
+}
+
+vk::AccelerationStructure::~AccelerationStructure()
+{
+    static PFN_vkDestroyAccelerationStructureKHR vkDestroyAccelerationStructureKHR = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(vkGetDeviceProcAddr(m_rc->getDevice(), "vkDestroyAccelerationStructureKHR"));
+
+    for (const auto& AS : m_blases)
+        vkDestroyAccelerationStructureKHR(m_rc->getDevice(), AS.second, nullptr);
+    vkDestroyAccelerationStructureKHR(m_rc->getDevice(), m_tlas, nullptr);
+}
+
+void vk::AccelerationStructure::buildBlases(const Scene& scene)
+{
+    static PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(vkGetDeviceProcAddr(m_rc->getDevice(), "vkGetAccelerationStructureBuildSizesKHR"));
+    static PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(vkGetDeviceProcAddr(m_rc->getDevice(), "vkCreateAccelerationStructureKHR"));
+
+    for (const Mesh& m : scene.m_meshes)
+    {
+        // TODO do we have to ensure buffers we get device addresses for are actually in device memory?
+        VkBufferDeviceAddressInfo addrInfo{};
+        addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+        addrInfo.buffer = *m.positionBuffer;
+        VkDeviceOrHostAddressConstKHR vertexBufferAddr;
+        vertexBufferAddr.deviceAddress = vkGetBufferDeviceAddress(m_rc->getDevice(), &addrInfo);
+
+        addrInfo.buffer = *m.indexBuffer;
+        VkDeviceOrHostAddressConstKHR indexBufferAddr;
+        indexBufferAddr.deviceAddress = vkGetBufferDeviceAddress(m_rc->getDevice(), &addrInfo);
+
+        // TODO different data formats
+        VkAccelerationStructureGeometryTrianglesDataKHR trianglesData{};
+        trianglesData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+        trianglesData.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        trianglesData.vertexData = vertexBufferAddr;
+        trianglesData.maxVertex = (m.positionBuffer->m_size / 12u) - 1u;
+        trianglesData.vertexStride = 12u;
+        trianglesData.indexType = VK_INDEX_TYPE_UINT16;
+        trianglesData.indexData = indexBufferAddr;
+
+        VkAccelerationStructureGeometryDataKHR geomData{};
+        geomData.triangles = trianglesData;
+
+        VkAccelerationStructureGeometryKHR geom{};
+        geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+        geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        geom.geometry = geomData;
+        geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+
+        VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
+        buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+        buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+        buildInfo.geometryCount = 1u;
+        buildInfo.pGeometries = &geom;
+
+        uint32_t primCount = m.indexCount / 3u;
+        VkAccelerationStructureBuildSizesInfoKHR sizeInfo{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+        vkGetAccelerationStructureBuildSizesKHR(m_rc->getDevice(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &primCount, &sizeInfo);
+
+        std::shared_ptr<vk::Buffer> ASBuf = m_rc->createBuffer(sizeInfo.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+
+        VkAccelerationStructureCreateInfoKHR ASInfo{};
+        ASInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+        ASInfo.buffer = *ASBuf;
+        ASInfo.offset = 0u;
+        ASInfo.size = sizeInfo.accelerationStructureSize;
+        ASInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+
+        VkAccelerationStructureKHR AS;
+        VK_CHECK(vkCreateAccelerationStructureKHR(m_rc->getDevice(), &ASInfo, nullptr, &AS), "failed to create BLAS!");
+
+        buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+        buildInfo.dstAccelerationStructure = AS;
+
+        std::shared_ptr<vk::AlignedBuffer> scratchBuf = m_rc->createAlignedBuffer(sizeInfo.buildScratchSize, m_rc->m_ASProperties.minAccelerationStructureScratchOffsetAlignment, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+
+        addrInfo.buffer = *scratchBuf;
+        VkDeviceOrHostAddressKHR scratchBufferAddr;
+        scratchBufferAddr.deviceAddress = vkGetBufferDeviceAddress(m_rc->getDevice(), &addrInfo);
+
+        buildInfo.scratchData = scratchBufferAddr;
+
+        VkAccelerationStructureBuildRangeInfoKHR rangeInfo{};
+        rangeInfo.primitiveCount = primCount;
+        rangeInfo.primitiveOffset = 0u;
+        rangeInfo.firstVertex = 0u;
+
+        m_rc->buildAS(buildInfo, &rangeInfo);
+
+        m_blasBuffers.push_back(ASBuf);
+        m_blases[&m] = AS;
+    }
+}
+
+void vk::AccelerationStructure::buildTlas(const Scene& scene)
+{
+    static PFN_vkGetAccelerationStructureBuildSizesKHR vkGetAccelerationStructureBuildSizesKHR = reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(vkGetDeviceProcAddr(m_rc->getDevice(), "vkGetAccelerationStructureBuildSizesKHR"));
+    static PFN_vkCreateAccelerationStructureKHR vkCreateAccelerationStructureKHR = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(vkGetDeviceProcAddr(m_rc->getDevice(), "vkCreateAccelerationStructureKHR"));
+    static PFN_vkGetAccelerationStructureDeviceAddressKHR vkGetAccelerationStructureDeviceAddressKHR = reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(vkGetDeviceProcAddr(m_rc->getDevice(), "vkGetAccelerationStructureDeviceAddressKHR"));
+
+    std::vector<VkAccelerationStructureInstanceKHR> instances;
+    instances.reserve(scene.m_nodes.size());
+    for (int i = 0; i < scene.m_nodes.size(); i++)
+    {
+        Node* n = scene.m_nodes[i];
+        VkTransformMatrixKHR transform;
+        for (int row = 0; row < 3; row++)
+        {
+            for (int column = 0; column < 4; column++)
+            {
+                // glm matrices are column-major
+                transform.matrix[row][column] = n->recursiveTransform[column][row];
+            }
+        }
+
+        VkAccelerationStructureDeviceAddressInfoKHR ASAddr{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR };
+        ASAddr.accelerationStructure = m_blases[n->mesh];
+
+        VkAccelerationStructureInstanceKHR instance{};
+        instance.transform = transform;
+        instance.instanceCustomIndex = i;
+        instance.mask = 0xFF;
+        instance.accelerationStructureReference = vkGetAccelerationStructureDeviceAddressKHR(m_rc->getDevice(), &ASAddr);
+
+        instances.push_back(std::move(instance));
+    }
+
+    std::shared_ptr<AlignedBuffer> instancesDataBuf = m_rc->createAlignedBuffer(sizeof(VkAccelerationStructureInstanceKHR) * instances.size(), 8u, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    void* data = instancesDataBuf->map();
+    memcpy(data, instances.data(), sizeof(VkAccelerationStructureInstanceKHR) * instances.size());
+    instancesDataBuf->unmap();
+
+    VkBufferDeviceAddressInfo addrInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
+    addrInfo.buffer = *instancesDataBuf;
+    VkAccelerationStructureGeometryInstancesDataKHR instancesData{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR };
+    instancesData.data.deviceAddress = vkGetBufferDeviceAddress(m_rc->getDevice(), &addrInfo);
+    VkAccelerationStructureGeometryDataKHR geomData{};
+    geomData.instances = instancesData;
+
+    VkAccelerationStructureGeometryKHR geom{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
+    geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    geom.geometry = geomData;
+
+    VkAccelerationStructureBuildGeometryInfoKHR buildInfo{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+    buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    buildInfo.geometryCount = 1u;
+    buildInfo.pGeometries = &geom;
+
+    uint32_t instanceCount = static_cast<uint32_t>(instances.size());
+    VkAccelerationStructureBuildSizesInfoKHR sizeInfo{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
+    vkGetAccelerationStructureBuildSizesKHR(m_rc->getDevice(), VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &instanceCount, &sizeInfo);
+
+    m_tlasBuffer = m_rc->createBuffer(sizeInfo.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+
+    VkAccelerationStructureCreateInfoKHR ASInfo{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
+    ASInfo.buffer = *m_tlasBuffer;
+    ASInfo.offset = 0u;
+    ASInfo.size = sizeInfo.accelerationStructureSize;
+    ASInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+
+    VK_CHECK(vkCreateAccelerationStructureKHR(m_rc->getDevice(), &ASInfo, nullptr, &m_tlas), "failed to create TLAS!");
+
+    buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    buildInfo.dstAccelerationStructure = m_tlas;
+
+    std::shared_ptr<vk::AlignedBuffer> scratchBuf = m_rc->createAlignedBuffer(sizeInfo.buildScratchSize, m_rc->m_ASProperties.minAccelerationStructureScratchOffsetAlignment, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+    
+    addrInfo.buffer = *scratchBuf;
+    VkDeviceOrHostAddressKHR scratchBufferAddr;
+    scratchBufferAddr.deviceAddress = vkGetBufferDeviceAddress(m_rc->getDevice(), &addrInfo);
+
+    buildInfo.scratchData = scratchBufferAddr;
+
+    VkAccelerationStructureBuildRangeInfoKHR rangeInfo{};
+    rangeInfo.primitiveCount = instanceCount;
+    rangeInfo.primitiveOffset = 0u;
+
+    m_rc->buildAS(buildInfo, &rangeInfo);
 }

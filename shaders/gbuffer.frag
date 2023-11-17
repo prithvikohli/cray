@@ -21,7 +21,7 @@ void main()
     albedoMetallicOut.a = texture(metallicRoughness, v_texCoord).b;
 
     vec3 normal = normalize(v_normal);
-    vec3 u = normal.z > 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(0.0, 0.0, 1.0);
+    vec3 u = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 tangent = normalize(cross(normal, u));
     vec3 bitangent = cross(normal, tangent);
 

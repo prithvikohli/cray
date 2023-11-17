@@ -92,8 +92,12 @@ private:
 
     std::unique_ptr<Scene> m_scene;
     std::vector<DrawableNode> m_drawableNodes;
+    std::unique_ptr<vk::AccelerationStructure> m_AS;
 
     std::shared_ptr<vk::Buffer> m_lightingUniforms;
+
+    std::shared_ptr<vk::Image> m_envMapImg;
+    std::shared_ptr<vk::ImageView> m_envMapView;
 
     void createSyncObjects();
     void createLightingDescriptorSet();

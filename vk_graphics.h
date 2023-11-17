@@ -44,6 +44,30 @@ private:
     VkBuffer m_handle;
 };
 
+class AlignedBuffer
+{
+public:
+    AlignedBuffer(VmaAllocator allocator, VkDeviceSize size, VkDeviceSize minAlignment, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags);
+    AlignedBuffer(const Buffer&) = delete;
+
+    ~AlignedBuffer();
+
+    void* map() const;
+    void unmap() const;
+
+    VkBuffer getHandle() const;
+
+    AlignedBuffer& operator=(const Buffer&) = delete;
+    operator VkBuffer() const;
+
+    VkDeviceSize m_size;
+
+private:
+    VmaAllocator m_allocator;
+    VmaAllocation m_allocation;
+    VkBuffer m_handle;
+};
+
 class Image
 {
 public:
@@ -104,15 +128,19 @@ public:
     void waitIdle() const { VK_CHECK(vkDeviceWaitIdle(m_device), "device failed to wait idle!"); }
     
     std::shared_ptr<Buffer> createBuffer(VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const;
+    std::shared_ptr<AlignedBuffer> createAlignedBuffer(VkDeviceSize size, VkDeviceSize minAlignment, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const;
     std::shared_ptr<Image> createImage(VkImageCreateInfo imageInfo, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const;
     std::shared_ptr<ImageView> createImageView(const vk::Image& image, VkImageViewType viewType, VkImageSubresourceRange subRange) const;
 
     void copyBuffer(const Buffer& src, const Buffer& dst) const;
     void copyImage(const Image& src, const Image& dst) const;
 
+    void buildAS(VkAccelerationStructureBuildGeometryInfoKHR buildInfo, VkAccelerationStructureBuildRangeInfoKHR* rangeInfo) const;
+
     RenderContext& operator=(const RenderContext&) = delete;
 
     VkExtent2D m_extent;
+    VkPhysicalDeviceAccelerationStructurePropertiesKHR m_ASProperties;
 
 private:
     VkInstance m_instance;
