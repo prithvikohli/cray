@@ -9,74 +9,73 @@
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
     </Filter>
-    <Filter Include="Resource Files">
-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
-    </Filter>
     <Filter Include="Source Files\shaders">
       <UniqueIdentifier>{2a813ba3-2c1e-479e-8035-f1f7edb96b77}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\external">
+      <UniqueIdentifier>{54f9fd8c-111c-4541-9d7a-5b1b566c4b33}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="vk_graphics.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="gbuffer.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="lighting.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="renderer.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="main.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="scene.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="vk_mem_alloc.h">
+    <ClInclude Include="src\gbuffer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="json.hpp">
+    <ClInclude Include="src\lighting.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="stb_image.h">
+    <ClInclude Include="src\renderer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="stb_image_write.h">
+    <ClInclude Include="src\scene.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="tiny_gltf.h">
+    <ClInclude Include="src\vk_graphics.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="vk_graphics.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="src\json.hpp">
+      <Filter>Header Files\external</Filter>
     </ClInclude>
-    <ClInclude Include="gbuffer.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="src\stb_image.h">
+      <Filter>Header Files\external</Filter>
     </ClInclude>
-    <ClInclude Include="lighting.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="src\stb_image_write.h">
+      <Filter>Header Files\external</Filter>
     </ClInclude>
-    <ClInclude Include="renderer.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="src\tiny_gltf.h">
+      <Filter>Header Files\external</Filter>
     </ClInclude>
-    <ClInclude Include="scene.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="src\vk_mem_alloc.h">
+      <Filter>Header Files\external</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="shaders\gbuffer.vert">
+    <ClCompile Include="src\gbuffer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\lighting.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\renderer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\scene.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\vk_graphics.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="src\shaders\gbuffer.frag">
       <Filter>Source Files\shaders</Filter>
     </None>
-    <None Include="shaders\lighting.comp">
+    <None Include="src\shaders\gbuffer.vert">
       <Filter>Source Files\shaders</Filter>
     </None>
-    <None Include="shaders\gbuffer.frag">
+    <None Include="src\shaders\lighting.comp">
       <Filter>Source Files\shaders</Filter>
     </None>
   </ItemGroup>

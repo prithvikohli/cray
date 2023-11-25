@@ -180,7 +180,7 @@ Renderer::Renderer(vk::RenderContext* rc, const std::string& shadersDir) : m_rc(
     int width = 4096;
     int height = 2048;
     int channels = 3;
-    float* imgData = stbi_loadf("sky.hdr", &width, &height, &channels, 4);
+    float* imgData = stbi_loadf("assets/environment_maps/kart.hdr", &width, &height, &channels, 4);
 
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;

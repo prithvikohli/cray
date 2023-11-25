@@ -242,15 +242,9 @@ void RenderContext::present(uint32_t swapIdx, VkSemaphore waitSemaphore) const
     VK_CHECK(vkQueuePresentKHR(m_queue, &presentInfo), "failed to present swapchain!");
 }
 
-std::shared_ptr<Buffer> RenderContext::createBuffer(VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const
+std::shared_ptr<Buffer> RenderContext::createBuffer(VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags, VkDeviceSize minAlignment) const
 {
-    std::shared_ptr<Buffer> buf = std::make_shared<Buffer>(m_allocator, size, bufferUsage, memoryUsage, allocFlags, memoryFlags);
-    return buf;
-}
-
-std::shared_ptr<AlignedBuffer> RenderContext::createAlignedBuffer(VkDeviceSize size, VkDeviceSize minAlignment, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const
-{
-    std::shared_ptr<AlignedBuffer> buf = std::make_shared<AlignedBuffer>(m_allocator, size, minAlignment, bufferUsage, memoryUsage, allocFlags, memoryFlags);
+    std::shared_ptr<Buffer> buf = std::make_shared<Buffer>(m_allocator, size, bufferUsage, memoryUsage, allocFlags, memoryFlags, minAlignment);
     return buf;
 }
 
@@ -429,10 +423,9 @@ void RenderContext::buildAS(VkAccelerationStructureBuildGeometryInfoKHR buildInf
     vkFreeCommandBuffers(m_device, m_cmdPoolTransient, 1u, &cmd);
 }
 
-Buffer::Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) : m_allocator(allocator), m_size(size)
+Buffer::Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags, VkDeviceSize minAlignment) : m_allocator(allocator), m_size(size)
 {
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    VkBufferCreateInfo bufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
     bufferInfo.size = m_size;
     bufferInfo.usage = bufferUsage;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -442,7 +435,14 @@ Buffer::Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags buf
     allocInfo.flags = allocFlags;
     allocInfo.requiredFlags = memoryFlags;
 
-    VK_CHECK(vmaCreateBuffer(m_allocator, &bufferInfo, &allocInfo, &m_handle, &m_allocation, nullptr), "failed to create VMA buffer!");
+    if (minAlignment != 0)
+    {
+        VK_CHECK(vmaCreateBufferWithAlignment(m_allocator, &bufferInfo, &allocInfo, minAlignment, &m_handle, &m_allocation, nullptr), "failed to create aligned VMA buffer!");
+    }
+    else
+    {
+        VK_CHECK(vmaCreateBuffer(m_allocator, &bufferInfo, &allocInfo, &m_handle, &m_allocation, nullptr), "failed to create VMA buffer!");
+    }
 }
 
 Buffer::~Buffer()
@@ -460,59 +460,6 @@ void* Buffer::map() const
 void Buffer::unmap() const
 {
     vmaUnmapMemory(m_allocator, m_allocation);
-}
-
-VkBuffer Buffer::getHandle() const
-{
-    return m_handle;
-}
-
-Buffer::operator VkBuffer() const
-{
-    return m_handle;
-}
-
-AlignedBuffer::AlignedBuffer(VmaAllocator allocator, VkDeviceSize size, VkDeviceSize minAlignment, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) : m_allocator(allocator), m_size(size)
-{
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = m_size;
-    bufferInfo.usage = bufferUsage;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = memoryUsage;
-    allocInfo.flags = allocFlags;
-    allocInfo.requiredFlags = memoryFlags;
-
-    VK_CHECK(vmaCreateBufferWithAlignment(m_allocator, &bufferInfo, &allocInfo, minAlignment, &m_handle, &m_allocation, nullptr), "failed to create aligned VMA buffer!");
-}
-
-AlignedBuffer::~AlignedBuffer()
-{
-    vmaDestroyBuffer(m_allocator, m_handle, m_allocation);
-}
-
-void* AlignedBuffer::map() const
-{
-    void* data;
-    VK_CHECK(vmaMapMemory(m_allocator, m_allocation, &data), "failed to map aligned VMA buffer!");
-    return data;
-}
-
-void AlignedBuffer::unmap() const
-{
-    vmaUnmapMemory(m_allocator, m_allocation);
-}
-
-VkBuffer AlignedBuffer::getHandle() const
-{
-    return m_handle;
-}
-
-AlignedBuffer::operator VkBuffer() const
-{
-    return m_handle;
 }
 
 Image::Image(VmaAllocator allocator, VkImageCreateInfo imageInfo, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) : m_allocator(allocator), m_imageInfo(imageInfo)

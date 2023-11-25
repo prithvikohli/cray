@@ -342,7 +342,7 @@ void vk::AccelerationStructure::buildBlases(const Scene& scene)
         buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
         buildInfo.dstAccelerationStructure = AS;
 
-        std::shared_ptr<vk::AlignedBuffer> scratchBuf = m_rc->createAlignedBuffer(sizeInfo.buildScratchSize, m_rc->m_ASProperties.minAccelerationStructureScratchOffsetAlignment, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        std::shared_ptr<vk::Buffer> scratchBuf = m_rc->createBuffer(sizeInfo.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u, m_rc->m_ASProperties.minAccelerationStructureScratchOffsetAlignment);
 
         addrInfo.buffer = *scratchBuf;
         VkDeviceOrHostAddressKHR scratchBufferAddr;
@@ -395,7 +395,7 @@ void vk::AccelerationStructure::buildTlas(const Scene& scene)
         instances.push_back(std::move(instance));
     }
 
-    std::shared_ptr<AlignedBuffer> instancesDataBuf = m_rc->createAlignedBuffer(sizeof(VkAccelerationStructureInstanceKHR) * instances.size(), 8u, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    std::shared_ptr<Buffer> instancesDataBuf = m_rc->createBuffer(sizeof(VkAccelerationStructureInstanceKHR) * instances.size(), VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 8u);
     void* data = instancesDataBuf->map();
     memcpy(data, instances.data(), sizeof(VkAccelerationStructureInstanceKHR) * instances.size());
     instancesDataBuf->unmap();
@@ -434,8 +434,8 @@ void vk::AccelerationStructure::buildTlas(const Scene& scene)
     buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     buildInfo.dstAccelerationStructure = m_tlas;
 
-    std::shared_ptr<vk::AlignedBuffer> scratchBuf = m_rc->createAlignedBuffer(sizeInfo.buildScratchSize, m_rc->m_ASProperties.minAccelerationStructureScratchOffsetAlignment, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-    
+    std::shared_ptr<vk::Buffer> scratchBuf = m_rc->createBuffer(sizeInfo.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u, m_rc->m_ASProperties.minAccelerationStructureScratchOffsetAlignment);
+
     addrInfo.buffer = *scratchBuf;
     VkDeviceOrHostAddressKHR scratchBufferAddr;
     scratchBufferAddr.deviceAddress = vkGetBufferDeviceAddress(m_rc->getDevice(), &addrInfo);

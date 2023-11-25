@@ -23,7 +23,7 @@ namespace vk
 class Buffer
 {
 public:
-    Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags);
+    Buffer(VmaAllocator allocator, VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags = 0u, VkMemoryPropertyFlags memoryFlags = 0u, VkDeviceSize minAlignment = 0u);
     Buffer(const Buffer&) = delete;
 
     ~Buffer();
@@ -31,34 +31,10 @@ public:
     void* map() const;
     void unmap() const;
 
-    VkBuffer getHandle() const;
+    VkBuffer getHandle() const { return m_handle; }
 
     Buffer& operator=(const Buffer&) = delete;
-    operator VkBuffer() const;
-
-    VkDeviceSize m_size;
-
-private:
-    VmaAllocator m_allocator;
-    VmaAllocation m_allocation;
-    VkBuffer m_handle;
-};
-
-class AlignedBuffer
-{
-public:
-    AlignedBuffer(VmaAllocator allocator, VkDeviceSize size, VkDeviceSize minAlignment, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags);
-    AlignedBuffer(const Buffer&) = delete;
-
-    ~AlignedBuffer();
-
-    void* map() const;
-    void unmap() const;
-
-    VkBuffer getHandle() const;
-
-    AlignedBuffer& operator=(const Buffer&) = delete;
-    operator VkBuffer() const;
+    operator VkBuffer() const { return m_handle; }
 
     VkDeviceSize m_size;
 
@@ -127,8 +103,7 @@ public:
     void present(uint32_t swapIdx, VkSemaphore waitSemaphore) const;
     void waitIdle() const { VK_CHECK(vkDeviceWaitIdle(m_device), "device failed to wait idle!"); }
     
-    std::shared_ptr<Buffer> createBuffer(VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const;
-    std::shared_ptr<AlignedBuffer> createAlignedBuffer(VkDeviceSize size, VkDeviceSize minAlignment, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const;
+    std::shared_ptr<Buffer> createBuffer(VkDeviceSize size, VkBufferUsageFlags bufferUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags = 0u, VkMemoryPropertyFlags memoryFlags = 0u, VkDeviceSize minAlignment = 0u) const;
     std::shared_ptr<Image> createImage(VkImageCreateInfo imageInfo, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const;
     std::shared_ptr<ImageView> createImageView(const vk::Image& image, VkImageViewType viewType, VkImageSubresourceRange subRange) const;
 

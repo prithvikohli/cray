@@ -1,5 +1,6 @@
 #include "renderer.h"
 
+// TODO make configurable
 #define WINDOW_WIDTH 2560
 #define WINDOW_HEIGHT 1440
 
@@ -16,9 +17,9 @@ int main()
         throw std::runtime_error("failed to create GLFW window!");
 
     vk::RenderContext rc(window);
-    Renderer renderer(&rc, "shaders/");
+    Renderer renderer(&rc, "src/shaders/");
 
-    renderer.loadScene("DamagedHelmet.glb", true);
+    renderer.loadScene("assets/scenes/DamagedHelmet.glb", true);
 
     while (!glfwWindowShouldClose(window))
     {
