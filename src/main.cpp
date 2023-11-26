@@ -28,7 +28,7 @@ int main()
         renderer.render();
     }
 
-    rc.waitIdle();
+    rc.deviceWaitIdle();
 
     glfwDestroyWindow(window);
     glfwTerminate();

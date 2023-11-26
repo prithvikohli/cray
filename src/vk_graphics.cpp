@@ -52,8 +52,7 @@ RenderContext::~RenderContext()
 
 void RenderContext::createInstance()
 {
-    VkApplicationInfo appInfo{};
-    appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+    VkApplicationInfo appInfo{ VK_STRUCTURE_TYPE_APPLICATION_INFO };
     appInfo.apiVersion = VK_MAKE_API_VERSION(1, 2, 0, 0);
     appInfo.applicationVersion = 0u;
     appInfo.pApplicationName = "cray";
@@ -63,8 +62,7 @@ void RenderContext::createInstance()
     if (glfwExtensionCount == 0)
         throw std::runtime_error("failed to get required GLFW extensions!");
 
-    VkInstanceCreateInfo instanceInfo{};
-    instanceInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    VkInstanceCreateInfo instanceInfo{ VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     instanceInfo.enabledLayerCount = ENABLED_LAYER_COUNT;
     instanceInfo.ppEnabledLayerNames = ENABLED_LAYER_NAMES;
     instanceInfo.enabledExtensionCount = glfwExtensionCount;
@@ -92,6 +90,7 @@ void RenderContext::getPhysicalDevice()
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(physicalDevices[i], &props);
         // TODO make sure we select the right discrete GPU
+        // with required properties, features etc.!
         if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
         {
             physicalDeviceIdx = i;
@@ -136,8 +135,7 @@ void RenderContext::chooseGctPresentQueue()
 void RenderContext::createDeviceAndQueue()
 {
     const float queuePriority = 0.0f;
-    VkDeviceQueueCreateInfo queueInfo{};
-    queueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    VkDeviceQueueCreateInfo queueInfo{ VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
     queueInfo.queueFamilyIndex = m_queueFamilyIdx;
     queueInfo.queueCount = 1u;
     queueInfo.pQueuePriorities = &queuePriority;
@@ -156,8 +154,7 @@ void RenderContext::createDeviceAndQueue()
     VkPhysicalDeviceFeatures2 deviceFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
     deviceFeatures.pNext = &RQFeatures;
 
-    VkDeviceCreateInfo deviceInfo{};
-    deviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    VkDeviceCreateInfo deviceInfo{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     deviceInfo.queueCreateInfoCount = 1u;
     deviceInfo.pQueueCreateInfos = &queueInfo;
     deviceInfo.enabledExtensionCount = ENABLED_DEVICE_EXTENSION_COUNT;
@@ -170,15 +167,13 @@ void RenderContext::createDeviceAndQueue()
 
 void RenderContext::createCommandBuffer()
 {
-    VkCommandPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    VkCommandPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
     poolInfo.queueFamilyIndex = m_queueFamilyIdx;
     poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
     VK_CHECK(vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_cmdPool), "failed to create command pool!");
 
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    VkCommandBufferAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandPool = m_cmdPool;
     allocInfo.commandBufferCount = 1u;
@@ -192,12 +187,12 @@ void RenderContext::createCommandBuffer()
 
 void RenderContext::createSwapchain()
 {
+    // TODO check surface, swapchain, and physical device support
     VkSurfaceCapabilitiesKHR surfaceCapabilities;
     VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_physicalDevice, m_surface, &surfaceCapabilities), "failed to get physical device surface capabilities!");
     m_extent = surfaceCapabilities.currentExtent;
 
-    VkSwapchainCreateInfoKHR swapchainInfo{};
-    swapchainInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    VkSwapchainCreateInfoKHR swapchainInfo{ VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     swapchainInfo.surface = m_surface;
     swapchainInfo.minImageCount = surfaceCapabilities.minImageCount + 1u;
     swapchainInfo.imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
@@ -219,20 +214,30 @@ void RenderContext::createSwapchain()
     vkGetSwapchainImagesKHR(m_device, m_swapchain, &swapchainImageCount, m_swapchainImages.data());
 }
 
-void RenderContext::acquireNextSwapchainImage(uint32_t* swapIdx, VkSemaphore acquiredSemaphore) const
+uint32_t RenderContext::acquireNextSwapchainImage(VkSemaphore acquiredSemaphore) const
 {
-    VK_CHECK(vkAcquireNextImageKHR(m_device, m_swapchain, UINT64_MAX, acquiredSemaphore, VK_NULL_HANDLE, swapIdx), "failed to acquire swapchain image!");
+    uint32_t swapIdx;
+    VK_CHECK(vkAcquireNextImageKHR(m_device, m_swapchain, UINT64_MAX, acquiredSemaphore, VK_NULL_HANDLE, &swapIdx), "failed to acquire swapchain image!");
+    return swapIdx;
 }
 
-void RenderContext::submitToQueue(VkSubmitInfo submitInfo, VkFence fence) const
+void RenderContext::submitToQueue(VkSemaphore waitSemaphore, VkPipelineStageFlags waitStageMask, VkSemaphore signalSemaphore, VkFence fence) const
 {
+    VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    submitInfo.waitSemaphoreCount = 1u;
+    submitInfo.pWaitSemaphores = &waitSemaphore;
+    submitInfo.pWaitDstStageMask = &waitStageMask;
+    submitInfo.commandBufferCount = 1u;
+    submitInfo.pCommandBuffers = &m_cmdBuf;
+    submitInfo.signalSemaphoreCount = 1u;
+    submitInfo.pSignalSemaphores = &signalSemaphore;
+
     VK_CHECK(vkQueueSubmit(m_queue, 1u, &submitInfo, fence), "failed to submit to queue!");
 }
 
 void RenderContext::present(uint32_t swapIdx, VkSemaphore waitSemaphore) const
 {
-    VkPresentInfoKHR presentInfo{};
-    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    VkPresentInfoKHR presentInfo{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     presentInfo.waitSemaphoreCount = 1u;
     presentInfo.pWaitSemaphores = &waitSemaphore;
     presentInfo.swapchainCount = 1u;
@@ -248,22 +253,21 @@ std::shared_ptr<Buffer> RenderContext::createBuffer(VkDeviceSize size, VkBufferU
     return buf;
 }
 
-std::shared_ptr<Image> RenderContext::createImage(VkImageCreateInfo imageInfo, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) const
+std::shared_ptr<Image> RenderContext::createImage(VkFormat format, VkExtent3D extent, VkImageUsageFlags imageUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags, VkImageLayout initialLayout, VkImageTiling tiling, uint32_t mipLevels, uint32_t arrayLayers, VkSampleCountFlagBits samples, VkImageType imageType) const
 {
-    std::shared_ptr<Image> img = std::make_shared<Image>(m_allocator, imageInfo, memoryUsage, allocFlags, memoryFlags);
+    std::shared_ptr<Image> img = std::make_shared<Image>(m_allocator, format, extent, imageUsage, memoryUsage, allocFlags, memoryFlags, initialLayout, tiling, mipLevels, arrayLayers, samples, imageType);
     return img;
 }
 
-std::shared_ptr<ImageView> RenderContext::createImageView(const vk::Image& image, VkImageViewType viewType, VkImageSubresourceRange subRange) const
+std::shared_ptr<ImageView> RenderContext::createImageView(vk::Image& image, VkImageAspectFlags aspectMask, uint32_t baseMipLevel, uint32_t levelCount, uint32_t baseArrayLayer, uint32_t layerCount, VkImageViewType viewType) const
 {
-    std::shared_ptr<ImageView> view = std::make_shared<ImageView>(m_device, image, viewType, subRange);
+    std::shared_ptr<ImageView> view = std::make_shared<ImageView>(m_device, image, aspectMask, baseMipLevel, levelCount, baseArrayLayer, layerCount, viewType);
     return view;
 }
 
-void RenderContext::copyBuffer(const Buffer& src, const Buffer& dst) const
+void RenderContext::copyStagingBuffer(const Buffer& dst, const Buffer& src, VkDeviceSize size, VkDeviceSize dstOffset, VkDeviceSize srcOffset) const
 {
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    VkCommandBufferAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandPool = m_cmdPoolTransient;
     allocInfo.commandBufferCount = 1u;
@@ -271,22 +275,19 @@ void RenderContext::copyBuffer(const Buffer& src, const Buffer& dst) const
     VkCommandBuffer cmd;
     VK_CHECK(vkAllocateCommandBuffers(m_device, &allocInfo, &cmd), "failed to allocate copy command buffer!");
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "failed to begin copy command buffer!");
 
-    // TODO this is a bit sketchy
     VkBufferCopy copy{};
-    copy.srcOffset = 0u;
-    copy.dstOffset = 0u;
-    copy.size = src.m_size;
+    copy.srcOffset = srcOffset;
+    copy.dstOffset = dstOffset;
+    copy.size = size;
 
     vkCmdCopyBuffer(cmd, src, dst, 1u, &copy);
     VK_CHECK(vkEndCommandBuffer(cmd), "failed to end copy command buffer!");
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
     submitInfo.commandBufferCount = 1u;
     submitInfo.pCommandBuffers = &cmd;
 
@@ -301,78 +302,51 @@ void RenderContext::copyBuffer(const Buffer& src, const Buffer& dst) const
     vkFreeCommandBuffers(m_device, m_cmdPoolTransient, 1u, &cmd);
 }
 
-void RenderContext::copyImage(const Image& src, const Image& dst) const
+void RenderContext::copyStagingImage(Image& dst, Image& src, VkExtent3D extent, VkImageAspectFlags dstAspectMask, VkImageAspectFlags srcAspectMask, VkImageLayout dstFinalLayout, uint32_t dstMipLevel, uint32_t srcMipLevel, VkOffset3D dstOffset, VkOffset3D srcOffset, uint32_t dstBaseArrayLayer, uint32_t srcBaseArrayLayer, uint32_t dstLayerCount, uint32_t srcLayerCount) const
 {
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    VkCommandBufferAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandPool = m_cmdPoolTransient;
     allocInfo.commandBufferCount = 1u;
 
-    VkCommandBuffer cmd;
-    VK_CHECK(vkAllocateCommandBuffers(m_device, &allocInfo, &cmd), "failed to allocate copy command buffer!");
+    VkCommandBuffer cmdHandle;
+    VK_CHECK(vkAllocateCommandBuffers(m_device, &allocInfo, &cmdHandle), "failed to allocate copy command buffer!");
+    CommandBuffer cmd(cmdHandle);
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "failed to begin copy command buffer!");
 
-    // TODO don't hardcode this
-    VkImageSubresourceRange subRange{};
-    subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    subRange.baseArrayLayer = 0u;
-    subRange.baseMipLevel = 0u;
-    subRange.layerCount = src.m_imageInfo.arrayLayers;
-    subRange.levelCount = src.m_imageInfo.mipLevels;
-    VkImageMemoryBarrier imageMemoryBarrier{};
-    imageMemoryBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    imageMemoryBarrier.srcAccessMask = 0u;
-    imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
-    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    imageMemoryBarrier.image = src;
-    imageMemoryBarrier.subresourceRange = subRange;
+    cmd.imageMemoryBarrier(src, srcAspectMask, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0u, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcMipLevel, 1u, srcBaseArrayLayer, srcLayerCount);
 
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+    cmd.imageMemoryBarrier(dst, dstAspectMask, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0u, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, dstMipLevel, 1u, dstBaseArrayLayer, dstLayerCount);
 
-    subRange.layerCount = dst.m_imageInfo.arrayLayers;
-    subRange.levelCount = dst.m_imageInfo.mipLevels;
-    imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    imageMemoryBarrier.image = dst;
-
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
-
-    // TODO don't hardcode this
-    VkImageSubresourceLayers subLayers{};
-    subLayers.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    subLayers.baseArrayLayer = 0u;
-    subLayers.layerCount = src.m_imageInfo.arrayLayers;
-    subLayers.mipLevel = 0u;
+    VkImageSubresourceLayers dstSubLayers{};
+    dstSubLayers.aspectMask = dstAspectMask;
+    dstSubLayers.baseArrayLayer = dstBaseArrayLayer;
+    dstSubLayers.layerCount = dstLayerCount;
+    dstSubLayers.mipLevel = dstMipLevel;
+    VkImageSubresourceLayers srcSubLayers{};
+    srcSubLayers.aspectMask = srcAspectMask;
+    srcSubLayers.baseArrayLayer = srcBaseArrayLayer;
+    srcSubLayers.layerCount = srcLayerCount;
+    srcSubLayers.mipLevel = srcMipLevel;
     VkImageCopy copy{};
-    copy.srcOffset = { 0, 0, 0 };
-    copy.dstOffset = { 0, 0, 0 };
-    copy.extent = src.m_imageInfo.extent;
-    copy.srcSubresource = subLayers;
-    copy.dstSubresource = subLayers;
+    copy.srcOffset = srcOffset;
+    copy.dstOffset = dstOffset;
+    copy.extent = extent;
+    copy.srcSubresource = srcSubLayers;
+    copy.dstSubresource = dstSubLayers;
 
-    vkCmdCopyImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1u, &copy);
+    vkCmdCopyImage(cmd, src, src.m_layout, dst, dst.m_layout, 1u, &copy);
 
-    // TODO make this configurable?
-    imageMemoryBarrier.srcAccessMask = 0;
-    imageMemoryBarrier.dstAccessMask = 0;
-    imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+    cmd.imageMemoryBarrier(dst, dstAspectMask, VK_PIPELINE_STAGE_TRANSFER_BIT, 0u, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0u, dstFinalLayout, dstMipLevel, 1u, dstBaseArrayLayer, dstLayerCount);
 
     VK_CHECK(vkEndCommandBuffer(cmd), "failed to end copy command buffer!");
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
     submitInfo.commandBufferCount = 1u;
-    submitInfo.pCommandBuffers = &cmd;
+    submitInfo.pCommandBuffers = &cmd.m_handle;
 
     VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
     VkFence fence;
@@ -382,15 +356,14 @@ void RenderContext::copyImage(const Image& src, const Image& dst) const
     VK_CHECK(vkWaitForFences(m_device, 1u, &fence, VK_TRUE, UINT64_MAX), "failed to wait for copy fence!");
 
     vkDestroyFence(m_device, fence, nullptr);
-    vkFreeCommandBuffers(m_device, m_cmdPoolTransient, 1u, &cmd);
+    vkFreeCommandBuffers(m_device, m_cmdPoolTransient, 1u, &cmd.m_handle);
 }
 
 void RenderContext::buildAS(VkAccelerationStructureBuildGeometryInfoKHR buildInfo, VkAccelerationStructureBuildRangeInfoKHR* rangeInfo) const
 {
     static PFN_vkCmdBuildAccelerationStructuresKHR vkCmdBuildAccelerationStructuresKHR = reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(vkGetDeviceProcAddr(m_device, "vkCmdBuildAccelerationStructuresKHR"));
 
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    VkCommandBufferAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
     allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocInfo.commandPool = m_cmdPoolTransient;
     allocInfo.commandBufferCount = 1u;
@@ -398,8 +371,7 @@ void RenderContext::buildAS(VkAccelerationStructureBuildGeometryInfoKHR buildInf
     VkCommandBuffer cmd;
     VK_CHECK(vkAllocateCommandBuffers(m_device, &allocInfo, &cmd), "failed to allocate build AS command buffer!");
 
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd, &beginInfo), "failed to begin build AS command buffer!");
 
@@ -407,8 +379,7 @@ void RenderContext::buildAS(VkAccelerationStructureBuildGeometryInfoKHR buildInf
 
     VK_CHECK(vkEndCommandBuffer(cmd), "failed to end build AS command buffer!");
 
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    VkSubmitInfo submitInfo{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
     submitInfo.commandBufferCount = 1u;
     submitInfo.pCommandBuffers = &cmd;
 
@@ -462,12 +433,23 @@ void Buffer::unmap() const
     vmaUnmapMemory(m_allocator, m_allocation);
 }
 
-Image::Image(VmaAllocator allocator, VkImageCreateInfo imageInfo, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags) : m_allocator(allocator), m_imageInfo(imageInfo)
+Image::Image(VmaAllocator allocator, VkFormat format, VkExtent3D extent, VkImageUsageFlags imageUsage, VmaMemoryUsage memoryUsage, VmaAllocationCreateFlags allocFlags, VkMemoryPropertyFlags memoryFlags, VkImageLayout initialLayout, VkImageTiling tiling, uint32_t mipLevels, uint32_t arrayLayers, VkSampleCountFlagBits samples, VkImageType imageType) : m_allocator(allocator), m_layout(initialLayout)
 {
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = memoryUsage;
     allocInfo.flags = allocFlags;
     allocInfo.requiredFlags = memoryFlags;
+
+    m_imageInfo.imageType = imageType;
+    m_imageInfo.format = format;
+    m_imageInfo.extent = extent;
+    m_imageInfo.mipLevels = mipLevels;
+    m_imageInfo.arrayLayers = arrayLayers;
+    m_imageInfo.samples = samples;
+    m_imageInfo.tiling = tiling;
+    m_imageInfo.usage = imageUsage;
+    m_imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    m_imageInfo.initialLayout = initialLayout;
 
     VK_CHECK(vmaCreateImage(m_allocator, &m_imageInfo, &allocInfo, &m_handle, &m_allocation, nullptr), "failed to create VMA image!");
 }
@@ -489,26 +471,21 @@ void Image::unmap() const
     vmaUnmapMemory(m_allocator, m_allocation);
 }
 
-VkImage Image::getHandle() const
+ImageView::ImageView(VkDevice device, vk::Image& image, VkImageAspectFlags aspectMask, uint32_t baseMipLevel, uint32_t levelCount, uint32_t baseArrayLayer, uint32_t layerCount, VkImageViewType viewType) : m_device(device), m_img(&image)
 {
-    return m_handle;
-}
+    VkImageSubresourceRange subRange{};
+    subRange.aspectMask = aspectMask;
+    subRange.baseMipLevel = baseMipLevel;
+    subRange.levelCount = levelCount;
+    subRange.baseArrayLayer = baseArrayLayer;
+    subRange.layerCount = layerCount;
 
-Image::operator VkImage() const
-{
-    return m_handle;
-}
+    m_viewInfo.image = image;
+    m_viewInfo.viewType = viewType;
+    m_viewInfo.format = image.m_imageInfo.format;
+    m_viewInfo.subresourceRange = subRange;
 
-ImageView::ImageView(VkDevice device, const vk::Image& image, VkImageViewType viewType, VkImageSubresourceRange subRange) : m_device(device)
-{
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = image;
-    viewInfo.viewType = viewType;
-    viewInfo.format = image.m_imageInfo.format;
-    viewInfo.subresourceRange = subRange;
-
-    VK_CHECK(vkCreateImageView(m_device, &viewInfo, nullptr, &m_handle), "failed to create image view!");
+    VK_CHECK(vkCreateImageView(m_device, &m_viewInfo, nullptr, &m_handle), "failed to create image view!");
 }
 
 ImageView::~ImageView()
@@ -516,14 +493,41 @@ ImageView::~ImageView()
     vkDestroyImageView(m_device, m_handle, nullptr);
 }
 
-VkImageView ImageView::getHandle() const
+void CommandBuffer::imageMemoryBarrier(Image& img, VkImageAspectFlags aspectMask, VkPipelineStageFlags srcStageMask, VkAccessFlags srcAccessMask, VkPipelineStageFlags dstStageMask, VkAccessFlags dstAccessMask, VkImageLayout newLayout, uint32_t baseMipLevel, uint32_t levelCount, uint32_t baseArrayLayer, uint32_t layerCount) const
 {
-    return m_handle;
+    VkImageSubresourceRange subRange{};
+    subRange.aspectMask = aspectMask;
+    subRange.baseArrayLayer = baseArrayLayer;
+    subRange.baseMipLevel = baseMipLevel;
+    subRange.layerCount = layerCount;
+    subRange.levelCount = levelCount;
+
+    VkImageMemoryBarrier imageMemoryBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    imageMemoryBarrier.srcAccessMask = srcAccessMask;
+    imageMemoryBarrier.dstAccessMask = dstAccessMask;
+    imageMemoryBarrier.oldLayout = img.m_layout;
+    imageMemoryBarrier.newLayout = newLayout;
+    imageMemoryBarrier.image = img;
+    imageMemoryBarrier.subresourceRange = subRange;
+
+    vkCmdPipelineBarrier(m_handle, srcStageMask, dstStageMask, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+    
+    img.m_layout = newLayout;
 }
 
-ImageView::operator VkImageView() const
+void CommandBuffer::imageMemoryBarrier(const ImageView& view, VkPipelineStageFlags srcStageMask, VkAccessFlags srcAccessMask, VkPipelineStageFlags dstStageMask, VkAccessFlags dstAccessMask, VkImageLayout newLayout) const
 {
-    return m_handle;
+    VkImageMemoryBarrier imageMemoryBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    imageMemoryBarrier.srcAccessMask = srcAccessMask;
+    imageMemoryBarrier.dstAccessMask = dstAccessMask;
+    imageMemoryBarrier.oldLayout = view.m_img->m_layout;
+    imageMemoryBarrier.newLayout = newLayout;
+    imageMemoryBarrier.image = *view.m_img;
+    imageMemoryBarrier.subresourceRange = view.m_viewInfo.subresourceRange;
+
+    vkCmdPipelineBarrier(m_handle, srcStageMask, dstStageMask, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+
+    view.m_img->m_layout = newLayout;
 }
 
 }

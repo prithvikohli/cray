@@ -102,42 +102,16 @@ Renderer::Renderer(vk::RenderContext* rc, const std::string& shadersDir) : m_rc(
     m_gbufferPass = std::make_unique<GBufferPass>(m_rc, vertCode, fragCode);
 
     {
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.format = VK_FORMAT_D32_SFLOAT;
-        imageInfo.extent = { m_rc->m_extent.width, m_rc->m_extent.height, 1u };
-        imageInfo.mipLevels = 1u;
-        imageInfo.arrayLayers = 1u;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        VkExtent3D extent = { m_rc->m_extent.width, m_rc->m_extent.height, 1u };
+        m_depthImg = m_rc->createImage(VK_FORMAT_D32_SFLOAT, extent, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m_albedoMetallicImg = m_rc->createImage(VK_FORMAT_R32G32B32A32_SFLOAT, extent, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m_normalRoughnessImg = m_rc->createImage(VK_FORMAT_R32G32B32A32_SFLOAT, extent, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m_emissiveImg = m_rc->createImage(VK_FORMAT_R32G32B32A32_SFLOAT, extent, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
 
-        m_depthImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-
-        imageInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-        imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-
-        m_albedoMetallicImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-        m_normalRoughnessImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-        m_emissiveImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-
-        VkImageSubresourceRange subRange{};
-        subRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        subRange.baseArrayLayer = 0u;
-        subRange.baseMipLevel = 0u;
-        subRange.layerCount = 1u;
-        subRange.levelCount = 1u;
-
-        m_gbuffer.depth = m_rc->createImageView(*m_depthImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
-
-        subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-
-        m_gbuffer.albedoMetallic = m_rc->createImageView(*m_albedoMetallicImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
-        m_gbuffer.normalRoughness = m_rc->createImageView(*m_normalRoughnessImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
-        m_gbuffer.emissive = m_rc->createImageView(*m_emissiveImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
+        m_gbuffer.depth = m_rc->createImageView(*m_depthImg, VK_IMAGE_ASPECT_DEPTH_BIT);
+        m_gbuffer.albedoMetallic = m_rc->createImageView(*m_albedoMetallicImg, VK_IMAGE_ASPECT_COLOR_BIT);
+        m_gbuffer.normalRoughness = m_rc->createImageView(*m_normalRoughnessImg, VK_IMAGE_ASPECT_COLOR_BIT);
+        m_gbuffer.emissive = m_rc->createImageView(*m_emissiveImg, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
     m_gbufferPass->bindBundle(m_gbuffer);
@@ -147,29 +121,9 @@ Renderer::Renderer(vk::RenderContext* rc, const std::string& shadersDir) : m_rc(
     m_lightingPass = std::make_unique<LightingPass>(m_rc, lightingCode);
 
     {
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-        imageInfo.extent = { m_rc->m_extent.width, m_rc->m_extent.height, 1u };
-        imageInfo.mipLevels = 1u;
-        imageInfo.arrayLayers = 1u;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        m_lightingImg = m_rc->createImage(VK_FORMAT_R32G32B32A32_SFLOAT, { m_rc->m_extent.width, m_rc->m_extent.height, 1u }, VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
 
-        m_lightingImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-
-        VkImageSubresourceRange subRange{};
-        subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        subRange.baseArrayLayer = 0u;
-        subRange.baseMipLevel = 0u;
-        subRange.layerCount = 1u;
-        subRange.levelCount = 1u;
-
-        m_lightingView = m_rc->createImageView(*m_lightingImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
+        m_lightingView = m_rc->createImageView(*m_lightingImg, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
     // create other objects owned by renderer
@@ -182,39 +136,16 @@ Renderer::Renderer(vk::RenderContext* rc, const std::string& shadersDir) : m_rc(
     int channels = 3;
     float* imgData = stbi_loadf("assets/environment_maps/kart.hdr", &width, &height, &channels, 4);
 
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    imageInfo.extent = { static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1u };
-    imageInfo.mipLevels = 1u;
-    imageInfo.arrayLayers = 1u;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_LINEAR;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
-
-    std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    VkExtent3D extent = { static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1u };
+    std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(VK_FORMAT_R32G32B32A32_SFLOAT, extent, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_TILING_LINEAR);
     void* data = stagingImg->map();
     memcpy(data, imgData, width * height * 16u);
     stagingImg->unmap();
 
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    m_envMapImg = m_rc->createImage(VK_FORMAT_R32G32B32A32_SFLOAT, extent, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+    m_rc->copyStagingImage(*m_envMapImg, *stagingImg, extent, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-    m_envMapImg = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-    m_rc->copyImage(*stagingImg, *m_envMapImg);
-
-    VkImageSubresourceRange subRange{};
-    subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    subRange.baseArrayLayer = 0u;
-    subRange.baseMipLevel = 0u;
-    subRange.layerCount = 1u;
-    subRange.levelCount = 1u;
-
-    m_envMapView = m_rc->createImageView(*m_envMapImg, VK_IMAGE_VIEW_TYPE_2D, subRange);
+    m_envMapView = m_rc->createImageView(*m_envMapImg, VK_IMAGE_ASPECT_COLOR_BIT);
 
     createSamplers();
     createLightingDescriptorSet();
@@ -396,19 +327,11 @@ DrawableNode Renderer::createDrawableNode(Node* node) const
     std::shared_ptr<vk::Buffer> uniformsBuffer = m_rc->createBuffer(sizeof(Uniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
     // create texture views
-    VkImageSubresourceRange subRange{};
-    subRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    subRange.baseArrayLayer = 0u;
-    subRange.baseMipLevel = 0u;
-    subRange.layerCount = node->mesh->material->albedo->m_imageInfo.arrayLayers;
-    subRange.baseMipLevel = 0u;
-    subRange.levelCount = node->mesh->material->albedo->m_imageInfo.mipLevels;
-
     MaterialViews matViews;
-    matViews.albedo = m_rc->createImageView(*node->mesh->material->albedo, VK_IMAGE_VIEW_TYPE_2D, subRange);
-    matViews.metallicRoughness = m_rc->createImageView(*node->mesh->material->metallicRoughness, VK_IMAGE_VIEW_TYPE_2D, subRange);
-    matViews.normal = m_rc->createImageView(*node->mesh->material->normal, VK_IMAGE_VIEW_TYPE_2D, subRange);
-    matViews.emissive = m_rc->createImageView(*node->mesh->material->emissive, VK_IMAGE_VIEW_TYPE_2D, subRange);
+    matViews.albedo = m_rc->createImageView(*node->mesh->material->albedo, VK_IMAGE_ASPECT_COLOR_BIT);
+    matViews.metallicRoughness = m_rc->createImageView(*node->mesh->material->metallicRoughness, VK_IMAGE_ASPECT_COLOR_BIT);
+    matViews.normal = m_rc->createImageView(*node->mesh->material->normal, VK_IMAGE_ASPECT_COLOR_BIT);
+    matViews.emissive = m_rc->createImageView(*node->mesh->material->emissive, VK_IMAGE_ASPECT_COLOR_BIT);
 
     // allocate descriptor set
     VkDescriptorSetLayout layout = m_gbufferPass->getDescriptorSetLayout();
@@ -488,8 +411,8 @@ void Renderer::render() const
     VK_CHECK(vkWaitForFences(m_device, 1u, &m_inFlightFence, VK_TRUE, UINT64_MAX), "renderer failed to wait for in flight fence!");
     VK_CHECK(vkResetFences(m_device, 1u, &m_inFlightFence), "renderer failed to reset in flight fence!");
 
-    uint32_t swapIdx;
-    m_rc->acquireNextSwapchainImage(&swapIdx, m_imageAcquiredSemaphore);
+    uint32_t swapIdx = m_rc->acquireNextSwapchainImage(m_imageAcquiredSemaphore);
+    VkImage swapImg = m_rc->getSwapchainImage(swapIdx);
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -534,7 +457,6 @@ void Renderer::render() const
 
     vkCmdPipelineBarrier(m_cmdBuf, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
 
-    VkImage swapImg = m_rc->getSwapchainImage(swapIdx);
     imageMemoryBarrier.srcAccessMask = 0u;
     imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -568,18 +490,7 @@ void Renderer::render() const
 
     VK_CHECK(vkEndCommandBuffer(m_cmdBuf), "renderer failed to end command buffer!");
 
-    VkPipelineStageFlags waitDstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.waitSemaphoreCount = 1u;
-    submitInfo.pWaitSemaphores = &m_imageAcquiredSemaphore;
-    submitInfo.pWaitDstStageMask = &waitDstStage;
-    submitInfo.commandBufferCount = 1u;
-    submitInfo.pCommandBuffers = &m_cmdBuf;
-    submitInfo.signalSemaphoreCount = 1u;
-    submitInfo.pSignalSemaphores = &m_renderFinishedSemaphore;
-
-    m_rc->submitToQueue(submitInfo, m_inFlightFence);
+    m_rc->submitToQueue(m_imageAcquiredSemaphore, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, m_renderFinishedSemaphore, m_inFlightFence);
     m_rc->present(swapIdx, m_renderFinishedSemaphore);
 }
 

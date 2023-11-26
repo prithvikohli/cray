@@ -64,81 +64,52 @@ void Scene::createMaterial(tinygltf::Model& model, tinygltf::Material& material)
     tinygltf::Image& emissiveImg = model.images[emissiveTex.source];
 
     Material mat;
-
-    VkImageCreateInfo stagingImageInfo{};
-    stagingImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    stagingImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    stagingImageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    stagingImageInfo.mipLevels = 1u;
-    stagingImageInfo.arrayLayers = 1u;
-    stagingImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    stagingImageInfo.tiling = VK_IMAGE_TILING_LINEAR;
-    stagingImageInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-    stagingImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    stagingImageInfo.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
-
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
-    imageInfo.mipLevels = 1u;
-    imageInfo.arrayLayers = 1u;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
     {
-        stagingImageInfo.extent = { static_cast<uint32_t>(albedoImg.width), static_cast<uint32_t>(albedoImg.height), 1u };
-        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(stagingImageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        VkExtent3D extent = { static_cast<uint32_t>(albedoImg.width), static_cast<uint32_t>(albedoImg.height), 1u };
+        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_TILING_LINEAR);
+
         void* data = stagingImg->map();
         memcpy(data, albedoImg.image.data(), albedoImg.image.size());
         stagingImg->unmap();
 
-        imageInfo.extent = stagingImageInfo.extent;
-        mat.albedo = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-
-        m_rc->copyImage(*stagingImg, *mat.albedo);
+        mat.albedo = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m_rc->copyStagingImage(*mat.albedo, *stagingImg, extent, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
     {
-        stagingImageInfo.extent = { static_cast<uint32_t>(metallicRoughnessImg.width), static_cast<uint32_t>(metallicRoughnessImg.height), 1u };
-        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(stagingImageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        VkExtent3D extent = { static_cast<uint32_t>(metallicRoughnessImg.width), static_cast<uint32_t>(metallicRoughnessImg.height), 1u };
+        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_TILING_LINEAR);
+
         void* data = stagingImg->map();
         memcpy(data, metallicRoughnessImg.image.data(), metallicRoughnessImg.image.size());
         stagingImg->unmap();
 
-        imageInfo.extent = stagingImageInfo.extent;
-        mat.metallicRoughness = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-
-        m_rc->copyImage(*stagingImg, *mat.metallicRoughness);
+        mat.metallicRoughness = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m_rc->copyStagingImage(*mat.metallicRoughness, *stagingImg, extent, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
     {
-        stagingImageInfo.extent = { static_cast<uint32_t>(normalImg.width), static_cast<uint32_t>(normalImg.height), 1u };
-        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(stagingImageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        VkExtent3D extent = { static_cast<uint32_t>(normalImg.width), static_cast<uint32_t>(normalImg.height), 1u };
+        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_TILING_LINEAR);
+
         void* data = stagingImg->map();
         memcpy(data, normalImg.image.data(), normalImg.image.size());
         stagingImg->unmap();
 
-        imageInfo.extent = stagingImageInfo.extent;
-        mat.normal = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-
-        m_rc->copyImage(*stagingImg, *mat.normal);
+        mat.normal = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m_rc->copyStagingImage(*mat.normal, *stagingImg, extent, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
     {
-        stagingImageInfo.extent = { static_cast<uint32_t>(emissiveImg.width), static_cast<uint32_t>(emissiveImg.height), 1u };
-        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(stagingImageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        VkExtent3D extent = { static_cast<uint32_t>(emissiveImg.width), static_cast<uint32_t>(emissiveImg.height), 1u };
+        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_TILING_LINEAR);
+
         void* data = stagingImg->map();
         memcpy(data, emissiveImg.image.data(), emissiveImg.image.size());
         stagingImg->unmap();
 
-        imageInfo.extent = stagingImageInfo.extent;
-        mat.emissive = m_rc->createImage(imageInfo, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-
-        m_rc->copyImage(*stagingImg, *mat.emissive);
+        mat.emissive = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m_rc->copyStagingImage(*mat.emissive, *stagingImg, extent, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
     m_materials.push_back(mat);
@@ -190,7 +161,7 @@ void Scene::createMesh(tinygltf::Model& model, tinygltf::Mesh& mesh)
         stagingBuf->unmap();
 
         m.indexBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(indexView.byteLength), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-        m_rc->copyBuffer(*stagingBuf, *m.indexBuffer);
+        m_rc->copyStagingBuffer(*m.indexBuffer, *stagingBuf, stagingBuf->m_size);
     }
 
     {
@@ -200,7 +171,7 @@ void Scene::createMesh(tinygltf::Model& model, tinygltf::Mesh& mesh)
         stagingBuf->unmap();
 
         m.positionBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(positionView.byteLength), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-        m_rc->copyBuffer(*stagingBuf, *m.positionBuffer);
+        m_rc->copyStagingBuffer(*m.positionBuffer, *stagingBuf, stagingBuf->m_size);
     }
 
     {
@@ -210,7 +181,7 @@ void Scene::createMesh(tinygltf::Model& model, tinygltf::Mesh& mesh)
         stagingBuf->unmap();
 
         m.normalBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(normalView.byteLength), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-        m_rc->copyBuffer(*stagingBuf, *m.normalBuffer);
+        m_rc->copyStagingBuffer(*m.normalBuffer, *stagingBuf, stagingBuf->m_size);
     }
 
     {
@@ -220,7 +191,7 @@ void Scene::createMesh(tinygltf::Model& model, tinygltf::Mesh& mesh)
         stagingBuf->unmap();
 
         m.texCoordBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(texCoordView.byteLength), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-        m_rc->copyBuffer(*stagingBuf, *m.texCoordBuffer);
+        m_rc->copyStagingBuffer(*m.texCoordBuffer, *stagingBuf, stagingBuf->m_size);
     }
 
     m.material = &m_materials[prim.material];
