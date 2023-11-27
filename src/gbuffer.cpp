@@ -1,63 +1,61 @@
 #include "gbuffer.h"
 
-GBufferPass::GBufferPass(vk::RenderContext* rc, const std::vector<uint32_t>& vertCode, const std::vector<uint32_t>& fragCode) : m_device(rc->getDevice()), m_extent(rc->m_extent)
+GBufferPass::GBufferPass(vk::RenderContext* rc, const vk::Image* depthAttachment, const std::vector<const vk::Image*>& colorAttachments, const std::vector<uint32_t>& vertCode, const std::vector<uint32_t>& fragCode) : m_device(rc->getDevice()), m_extent(rc->m_extent), m_colorAttachmentCount(colorAttachments.size())
 {
-    createRenderPass();
-    createLayouts();
-    createShaderModules(vertCode, fragCode);
-    createPipeline();
+    createRenderPass(depthAttachment, colorAttachments);
+    createPipelineLayout(vertCode, fragCode);
+    createPipeline(vertCode, fragCode);
 }
 
 GBufferPass::~GBufferPass()
 {
     vkDestroyPipeline(m_device, m_pipeline, nullptr);
-    vkDestroyShaderModule(m_device, m_vertModule, nullptr);
-    vkDestroyShaderModule(m_device, m_fragModule, nullptr);
-    vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
-    vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
     vkDestroyRenderPass(m_device, m_renderPass, nullptr);
-    if (m_framebuffer != VK_NULL_HANDLE)
-        vkDestroyFramebuffer(m_device, m_framebuffer, nullptr);
 }
 
-void GBufferPass::createRenderPass()
+void GBufferPass::createRenderPass(const vk::Image* depthImage, const std::vector<const vk::Image*>& colorImages)
 {
     VkAttachmentDescription depthAttachment{};
-    depthAttachment.format = VK_FORMAT_D32_SFLOAT;
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.format = depthImage->m_imageInfo.format;
+    depthAttachment.samples = depthImage->m_imageInfo.samples;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
-    VkAttachmentDescription albedoMetallicAttachment = depthAttachment;
-    albedoMetallicAttachment.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    albedoMetallicAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    std::vector<VkAttachmentDescription> colorAttachments;
+    colorAttachments.reserve(m_colorAttachmentCount);
+    for (const vk::Image* img : colorImages)
+    {
+        VkAttachmentDescription colorAttachment{};
+        colorAttachment.format = img->m_imageInfo.format;
+        colorAttachment.samples = img->m_imageInfo.samples;
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkAttachmentDescription normalRoughnessAttachment = albedoMetallicAttachment;
-    VkAttachmentDescription emissiveAttachment = albedoMetallicAttachment;
+        colorAttachments.push_back(colorAttachment);
+    }
 
     VkAttachmentReference depthRef{};
     depthRef.attachment = 0u;
     depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-    VkAttachmentReference albedoMetallicRef{};
-    albedoMetallicRef.attachment = 1u;
-    albedoMetallicRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    std::vector<VkAttachmentReference> colorRefs;
+    colorRefs.reserve(m_colorAttachmentCount);
+    for (uint32_t i = 1; i < m_colorAttachmentCount + 1u; i++)
+    {
+        VkAttachmentReference colorRef{};
+        colorRef.attachment = i;
+        colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        colorRefs.push_back(colorRef);
+    }
 
-    VkAttachmentReference normalRoughnessRef{};
-    normalRoughnessRef.attachment = 2u;
-    normalRoughnessRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference emissiveRef{};
-    emissiveRef.attachment = 3u;
-    emissiveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference colorAttachments[] = { albedoMetallicRef, normalRoughnessRef, emissiveRef };
     VkSubpassDescription subpassDesc{};
     subpassDesc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpassDesc.colorAttachmentCount = 3u;
-    subpassDesc.pColorAttachments = colorAttachments;
+    subpassDesc.colorAttachmentCount = m_colorAttachmentCount;
+    subpassDesc.pColorAttachments = colorRefs.data();
     subpassDesc.pDepthStencilAttachment = &depthRef;
 
     VkSubpassDependency dependency{};
@@ -68,11 +66,14 @@ void GBufferPass::createRenderPass()
     dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     dependency.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-    VkAttachmentDescription attachments[] = { depthAttachment, albedoMetallicAttachment, normalRoughnessAttachment, emissiveAttachment };
-    VkRenderPassCreateInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = 4u;
-    renderPassInfo.pAttachments = attachments;
+    std::vector<VkAttachmentDescription> attachments;
+    attachments.reserve(1u + m_colorAttachmentCount);
+    attachments.push_back(depthAttachment);
+    attachments.insert(attachments.end(), colorAttachments.begin(), colorAttachments.end());
+
+    VkRenderPassCreateInfo renderPassInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+    renderPassInfo.attachmentCount = attachments.size();
+    renderPassInfo.pAttachments = attachments.data();
     renderPassInfo.subpassCount = 1u;
     renderPassInfo.pSubpasses = &subpassDesc;
     renderPassInfo.dependencyCount = 1u;
@@ -81,69 +82,37 @@ void GBufferPass::createRenderPass()
     VK_CHECK(vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &m_renderPass), "failed to create GBuffer render pass!");
 }
 
-void GBufferPass::createLayouts()
+void GBufferPass::createPipelineLayout(const std::vector<uint32_t>& vertCode, const std::vector<uint32_t>& fragCode)
 {
-    VkDescriptorSetLayoutBinding uniformsBinding{};
-    uniformsBinding.binding = 0u;
-    uniformsBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    uniformsBinding.descriptorCount = 1u;
-    uniformsBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    const uint32_t* shaderBinaries[] = { vertCode.data(), fragCode.data() };
+    const size_t shaderSizes[]{ vertCode.size(), fragCode.size() };
+    const VkShaderStageFlags shaderStages[] = { VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_FRAGMENT_BIT };
 
-    VkDescriptorSetLayoutBinding albedoBinding{};
-    albedoBinding.binding = 1u;
-    albedoBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    albedoBinding.descriptorCount = 1u;
-    albedoBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    VkDescriptorSetLayoutBinding metallicRoughnessBinding = albedoBinding;
-    metallicRoughnessBinding.binding = 2u;
-    VkDescriptorSetLayoutBinding normalBinding = albedoBinding;
-    normalBinding.binding = 3u;
-    VkDescriptorSetLayoutBinding emissiveBinding = albedoBinding;
-    emissiveBinding.binding = 4u;
-
-    VkDescriptorSetLayoutBinding bindings[] = { uniformsBinding, albedoBinding, metallicRoughnessBinding, normalBinding, emissiveBinding };
-    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{};
-    descriptorSetLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    descriptorSetLayoutInfo.bindingCount = ARRAY_LENGTH(bindings);
-    descriptorSetLayoutInfo.pBindings = bindings;
-
-    VK_CHECK(vkCreateDescriptorSetLayout(m_device, &descriptorSetLayoutInfo, nullptr, &m_descriptorSetLayout), "failed to create GBuffer pipeline descriptor set layout!");
-
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1u;
-    layoutInfo.pSetLayouts = &m_descriptorSetLayout;
-
-    VK_CHECK(vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_pipelineLayout), "failed to create GBuffer pipeline layout!");
+    m_pipelineLayout = std::make_unique<vk::PipelineLayout>(m_device, shaderBinaries, shaderSizes, shaderStages, 2u);
 }
 
-void GBufferPass::createShaderModules(const std::vector<uint32_t>& vertCode, const std::vector<uint32_t>& fragCode)
+void GBufferPass::createPipeline(const std::vector<uint32_t>& vertCode, const std::vector<uint32_t>& fragCode)
 {
-    VkShaderModuleCreateInfo shaderInfo{};
-    shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    VkShaderModuleCreateInfo shaderInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
     shaderInfo.codeSize = vertCode.size() * 4u;
     shaderInfo.pCode = vertCode.data();
 
-    VK_CHECK(vkCreateShaderModule(m_device, &shaderInfo, nullptr, &m_vertModule), "failed to create GBuffer pass vertex shader module!");
+    VkShaderModule vertModule;
+    VK_CHECK(vkCreateShaderModule(m_device, &shaderInfo, nullptr, &vertModule), "failed to create GBuffer pass vertex shader module!");
 
     shaderInfo.codeSize = fragCode.size() * 4u;
     shaderInfo.pCode = fragCode.data();
 
-    VK_CHECK(vkCreateShaderModule(m_device, &shaderInfo, nullptr, &m_fragModule), "failed to create GBuffer pass fragment shader module!");
-}
+    VkShaderModule fragModule;
+    VK_CHECK(vkCreateShaderModule(m_device, &shaderInfo, nullptr, &fragModule), "failed to create GBuffer pass fragment shader module!");
 
-void GBufferPass::createPipeline()
-{
-    VkPipelineShaderStageCreateInfo vertStage{};
-    vertStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    VkPipelineShaderStageCreateInfo vertStage{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
     vertStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertStage.module = m_vertModule;
+    vertStage.module = vertModule;
     vertStage.pName = "main";
-    VkPipelineShaderStageCreateInfo fragStage{};
-    fragStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    VkPipelineShaderStageCreateInfo fragStage{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
     fragStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragStage.module = m_fragModule;
+    fragStage.module = fragModule;
     fragStage.pName = "main";
     VkPipelineShaderStageCreateInfo shaderStages[] = { vertStage, fragStage };
 
@@ -155,11 +124,15 @@ void GBufferPass::createPipeline()
     vertexBindingNormal.binding = 1u;
     vertexBindingNormal.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
     vertexBindingNormal.stride = 12u;
+    VkVertexInputBindingDescription vertexBindingTangent{};
+    vertexBindingTangent.binding = 2u;
+    vertexBindingTangent.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    vertexBindingTangent.stride = 12u;
     VkVertexInputBindingDescription vertexBindingTexCoord{};
-    vertexBindingTexCoord.binding = 2u;
+    vertexBindingTexCoord.binding = 3u;
     vertexBindingTexCoord.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
     vertexBindingTexCoord.stride = 8u;
-    VkVertexInputBindingDescription vertexBindings[] = { vertexBindingPosition, vertexBindingNormal, vertexBindingTexCoord };
+    VkVertexInputBindingDescription vertexBindings[] = { vertexBindingPosition, vertexBindingNormal, vertexBindingTangent, vertexBindingTexCoord };
 
     VkVertexInputAttributeDescription vertexAttributePosition{};
     vertexAttributePosition.location = 0u;
@@ -169,21 +142,23 @@ void GBufferPass::createPipeline()
     vertexAttributeNormal.location = 1u;
     vertexAttributeNormal.binding = 1u;
     vertexAttributeNormal.format = VK_FORMAT_R32G32B32_SFLOAT;
+    VkVertexInputAttributeDescription vertexAttributeTangent{};
+    vertexAttributeTangent.location = 2u;
+    vertexAttributeTangent.binding = 2u;
+    vertexAttributeTangent.format = VK_FORMAT_R32G32B32_SFLOAT;
     VkVertexInputAttributeDescription vertexAttributeTexCoord{};
-    vertexAttributeTexCoord.location = 2u;
-    vertexAttributeTexCoord.binding = 2u;
+    vertexAttributeTexCoord.location = 3u;
+    vertexAttributeTexCoord.binding = 3u;
     vertexAttributeTexCoord.format = VK_FORMAT_R32G32_SFLOAT;
-    VkVertexInputAttributeDescription vertexAttributes[] = { vertexAttributePosition, vertexAttributeNormal, vertexAttributeTexCoord };
+    VkVertexInputAttributeDescription vertexAttributes[] = { vertexAttributePosition, vertexAttributeNormal, vertexAttributeTangent, vertexAttributeTexCoord };
 
-    VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputInfo.vertexBindingDescriptionCount = 3u;
+    VkPipelineVertexInputStateCreateInfo vertexInputInfo{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    vertexInputInfo.vertexBindingDescriptionCount = ARRAY_LENGTH(vertexBindings);
     vertexInputInfo.pVertexBindingDescriptions = vertexBindings;
-    vertexInputInfo.vertexAttributeDescriptionCount = 3u;
+    vertexInputInfo.vertexAttributeDescriptionCount = ARRAY_LENGTH(vertexAttributes);
     vertexInputInfo.pVertexAttributeDescriptions = vertexAttributes;
 
-    VkPipelineInputAssemblyStateCreateInfo inputAssemblyInfo{};
-    inputAssemblyInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    VkPipelineInputAssemblyStateCreateInfo inputAssemblyInfo{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
     inputAssemblyInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
     VkViewport viewport{};
@@ -196,43 +171,40 @@ void GBufferPass::createPipeline()
     VkRect2D scissor;
     scissor.offset = { 0, 0 };
     scissor.extent = m_extent;
-    VkPipelineViewportStateCreateInfo viewportInfo{};
-    viewportInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    VkPipelineViewportStateCreateInfo viewportInfo{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
     viewportInfo.viewportCount = 1u;
     viewportInfo.pViewports = &viewport;
     viewportInfo.scissorCount = 1u;
     viewportInfo.pScissors = &scissor;
 
-    VkPipelineRasterizationStateCreateInfo rasterizerInfo{};
-    rasterizerInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    VkPipelineRasterizationStateCreateInfo rasterizerInfo{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
     rasterizerInfo.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizerInfo.cullMode = VK_CULL_MODE_BACK_BIT;
     rasterizerInfo.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterizerInfo.lineWidth = 1.0f;
 
-    VkPipelineMultisampleStateCreateInfo multisampleInfo{};
-    multisampleInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    VkPipelineMultisampleStateCreateInfo multisampleInfo{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
     multisampleInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-    VkPipelineColorBlendAttachmentState albedoMetallicBlendAttachmentInfo{};
-    albedoMetallicBlendAttachmentInfo.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    VkPipelineColorBlendAttachmentState normalRoughnessBlendAttachmentInfo = albedoMetallicBlendAttachmentInfo;
-    VkPipelineColorBlendAttachmentState emissiveBlendAttachmentInfo = albedoMetallicBlendAttachmentInfo;
-    VkPipelineColorBlendAttachmentState colorBlendAttachmentInfos[] = { albedoMetallicBlendAttachmentInfo, normalRoughnessBlendAttachmentInfo, emissiveBlendAttachmentInfo };
+    std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachmentStates;
+    colorBlendAttachmentStates.reserve(m_colorAttachmentCount);
+    for (uint32_t i = 0; i < m_colorAttachmentCount; i++)
+    {
+        VkPipelineColorBlendAttachmentState state{};
+        state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        colorBlendAttachmentStates.push_back(state);
+    }
 
-    VkPipelineColorBlendStateCreateInfo colorBlendInfo{};
-    colorBlendInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlendInfo.attachmentCount = 3u;
-    colorBlendInfo.pAttachments = colorBlendAttachmentInfos;
+    VkPipelineColorBlendStateCreateInfo colorBlendInfo{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+    colorBlendInfo.attachmentCount = colorBlendAttachmentStates.size();
+    colorBlendInfo.pAttachments = colorBlendAttachmentStates.data();
 
-    VkPipelineDepthStencilStateCreateInfo depthInfo{};
-    depthInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    VkPipelineDepthStencilStateCreateInfo depthInfo{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
     depthInfo.depthTestEnable = VK_TRUE;
     depthInfo.depthWriteEnable = VK_TRUE;
     depthInfo.depthCompareOp = VK_COMPARE_OP_LESS;
 
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    VkGraphicsPipelineCreateInfo pipelineInfo{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
     pipelineInfo.stageCount = 2u;
     pipelineInfo.pStages = shaderStages;
     pipelineInfo.pVertexInputState = &vertexInputInfo;
@@ -242,38 +214,22 @@ void GBufferPass::createPipeline()
     pipelineInfo.pMultisampleState = &multisampleInfo;
     pipelineInfo.pDepthStencilState = &depthInfo;
     pipelineInfo.pColorBlendState = &colorBlendInfo;
-    pipelineInfo.layout = m_pipelineLayout;
+    pipelineInfo.layout = *m_pipelineLayout;
     pipelineInfo.renderPass = m_renderPass;
     pipelineInfo.subpass = 0u;
 
     VK_CHECK(vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1u, &pipelineInfo, nullptr, &m_pipeline), "failed to create GBuffer pass pipeline!");
+
+    vkDestroyShaderModule(m_device, fragModule, nullptr);
+    vkDestroyShaderModule(m_device, vertModule, nullptr);
 }
 
-void GBufferPass::bindBundle(GBufferBundle bundle)
-{
-    if (m_framebuffer != VK_NULL_HANDLE)
-        vkDestroyFramebuffer(m_device, m_framebuffer, nullptr);
-
-    VkImageView attachments[] = { *bundle.depth, *bundle.albedoMetallic, *bundle.normalRoughness, *bundle.emissive };
-
-    VkFramebufferCreateInfo framebufferInfo{};
-    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    framebufferInfo.renderPass = m_renderPass;
-    framebufferInfo.attachmentCount = 4u;
-    framebufferInfo.pAttachments = attachments;
-    framebufferInfo.width = m_extent.width;
-    framebufferInfo.height = m_extent.height;
-    framebufferInfo.layers = 1u;
-
-    VK_CHECK(vkCreateFramebuffer(m_device, &framebufferInfo, nullptr, &m_framebuffer), "failed to create GBuffer pass framebuffer from bound GBuffer bundle!");
-}
-
-void GBufferPass::begin(VkCommandBuffer cmdBuf) const
+void GBufferPass::begin(VkCommandBuffer cmdBuf, VkFramebuffer framebuf) const
 {
     VkRect2D scissor;
     scissor.offset = { 0, 0 };
     scissor.extent = m_extent;
-    
+
     VkClearDepthStencilValue clearDepth{};
     clearDepth.depth = 1.0f;
 
@@ -283,19 +239,23 @@ void GBufferPass::begin(VkCommandBuffer cmdBuf) const
     clearCol.float32[2] = 0.0f;
     clearCol.float32[3] = 0.0f;
 
-    VkClearValue clearValues[4];
-    clearValues[0].depthStencil = clearDepth;
-    clearValues[1].color = clearCol;
-    clearValues[2].color = clearCol;
-    clearValues[3].color = clearCol;
+    std::vector<VkClearValue> clearValues(1u + m_colorAttachmentCount);
+    VkClearValue d;
+    d.depthStencil = clearDepth;
+    clearValues.push_back(d);
+    for (uint32_t i = 0; i < m_colorAttachmentCount; i++)
+    {
+        VkClearValue c;
+        c.color = clearCol;
+        clearValues.push_back(c);
+    }
 
-    VkRenderPassBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    VkRenderPassBeginInfo beginInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
     beginInfo.renderPass = m_renderPass;
-    beginInfo.framebuffer = m_framebuffer;
+    beginInfo.framebuffer = framebuf;
     beginInfo.renderArea = scissor;
-    beginInfo.clearValueCount = 4u;
-    beginInfo.pClearValues = clearValues;
+    beginInfo.clearValueCount = clearValues.size();
+    beginInfo.pClearValues = clearValues.data();
 
     vkCmdBeginRenderPass(cmdBuf, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdBindPipeline(cmdBuf, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);

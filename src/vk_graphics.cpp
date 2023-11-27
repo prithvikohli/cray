@@ -5,6 +5,8 @@
 
 #include "scene.h"
 
+#include <spirv_cross/spirv_glsl.hpp>
+
 #ifndef NDEBUG
 #define ENABLED_LAYER_COUNT 1u
 static const char* ENABLED_LAYER_NAMES[] = { "VK_LAYER_KHRONOS_validation" };
@@ -511,7 +513,7 @@ void CommandBuffer::imageMemoryBarrier(Image& img, VkImageAspectFlags aspectMask
     imageMemoryBarrier.subresourceRange = subRange;
 
     vkCmdPipelineBarrier(m_handle, srcStageMask, dstStageMask, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
-    
+
     img.m_layout = newLayout;
 }
 
@@ -528,6 +530,179 @@ void CommandBuffer::imageMemoryBarrier(const ImageView& view, VkPipelineStageFla
     vkCmdPipelineBarrier(m_handle, srcStageMask, dstStageMask, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
 
     view.m_img->m_layout = newLayout;
+}
+
+PipelineLayout::PipelineLayout(VkDevice device, const uint32_t** const shaderBinaries, const size_t* shaderSizes, const VkShaderStageFlags* shaderStages, const size_t shaderCount) : m_device(device)
+{
+    // TODO different sets
+    for (size_t i = 0; i < shaderCount; i++)
+    {
+        spirv_cross::CompilerGLSL comp(shaderBinaries[i], shaderSizes[i]);
+        spirv_cross::ShaderResources resources = comp.get_shader_resources();
+        for (auto& u : resources.uniform_buffers)
+        {
+            VkDescriptorSetLayoutBinding uniformBinding{};
+            uniformBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            // TODO arrays
+            uniformBinding.descriptorCount = 1u;
+            uniformBinding.stageFlags = shaderStages[i];
+            uniformBinding.binding = comp.get_decoration(u.id, spv::DecorationBinding);
+
+            m_bindings.push_back(uniformBinding);
+        }
+
+        for (auto& img : resources.sampled_images)
+        {
+            VkDescriptorSetLayoutBinding imgBinding{};
+            imgBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            // TODO arrays
+            imgBinding.descriptorCount = 1u;
+            imgBinding.stageFlags = shaderStages[i];
+            imgBinding.binding = comp.get_decoration(img.id, spv::DecorationBinding);
+
+            m_bindings.push_back(imgBinding);
+        }
+
+        for (auto& img : resources.storage_images)
+        {
+            VkDescriptorSetLayoutBinding imgBinding{};
+            imgBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            // TODO arrays
+            imgBinding.descriptorCount = 1u;
+            imgBinding.stageFlags = shaderStages[i];
+            imgBinding.binding = comp.get_decoration(img.id, spv::DecorationBinding);
+
+            m_bindings.push_back(imgBinding);
+        }
+
+        for (auto& as : resources.acceleration_structures)
+        {
+            VkDescriptorSetLayoutBinding asBinding{};
+            asBinding.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+            // TODO arrays
+            asBinding.descriptorCount = 1u;
+            asBinding.stageFlags = shaderStages[i];
+            asBinding.binding = comp.get_decoration(as.id, spv::DecorationBinding);
+
+            m_bindings.push_back(asBinding);
+        }
+    }
+
+    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    descriptorSetLayoutInfo.bindingCount = m_bindings.size();
+    descriptorSetLayoutInfo.pBindings = m_bindings.data();
+
+    VK_CHECK(vkCreateDescriptorSetLayout(m_device, &descriptorSetLayoutInfo, nullptr, &m_descriptorSetLayout), "failed to create descriptor set layout!");
+
+    // TODO push constants
+    VkPipelineLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    layoutInfo.setLayoutCount = 1u;
+    layoutInfo.pSetLayouts = &m_descriptorSetLayout;
+
+    VK_CHECK(vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_handle), "failed to create pipeline layout!");
+}
+
+PipelineLayout::~PipelineLayout()
+{
+    vkDestroyPipelineLayout(m_device, m_handle, nullptr);
+    vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
+}
+
+void DescriptorSet::setUniformBuffer(uint32_t binding, VkBuffer buf, VkDeviceSize range, VkDeviceSize offset) const
+{
+    VkDescriptorBufferInfo info;
+    info.buffer = buf;
+    info.range = range;
+    info.offset = offset;
+    VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    write.dstSet = m_handle;
+    write.dstBinding = binding;
+    // TODO arrays
+    write.descriptorCount = 1u;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    write.pBufferInfo = &info;
+
+    vkUpdateDescriptorSets(m_device, 1u, &write, 0u, nullptr);
+}
+
+void DescriptorSet::setCombinedImageSampler(uint32_t binding, VkImageView view, VkImageLayout layout, VkSampler sampler) const
+{
+    VkDescriptorImageInfo info;
+    info.imageView = view;
+    info.imageLayout = layout;
+    info.sampler = sampler;
+    VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    write.dstSet = m_handle;
+    write.dstBinding = binding;
+    // TODO arrays
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo = &info;
+
+    vkUpdateDescriptorSets(m_device, 1u, &write, 0u, nullptr);
+}
+
+void DescriptorSet::setImage(uint32_t binding, VkImageView view, VkImageLayout layout) const
+{
+    VkDescriptorImageInfo info{};
+    info.imageView = view;
+    info.imageLayout = layout;
+    VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    write.dstSet = m_handle;
+    write.dstBinding = binding;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    write.pImageInfo = &info;
+
+    vkUpdateDescriptorSets(m_device, 1u, &write, 0u, nullptr);
+}
+
+void DescriptorSet::setAccelerationStructure(uint32_t binding, VkAccelerationStructureKHR AS) const
+{
+    VkWriteDescriptorSetAccelerationStructureKHR writeAS{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR };
+    writeAS.accelerationStructureCount = 1u;
+    writeAS.pAccelerationStructures = &AS;
+    VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    write.dstSet = m_handle;
+    write.dstBinding = binding;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    write.pNext = &writeAS;
+    
+    vkUpdateDescriptorSets(m_device, 1u, &write, 0u, nullptr);
+}
+
+DescriptorPool::DescriptorPool(VkDevice device, uint32_t maxSets, const VkDescriptorSetLayoutBinding* bindings, const size_t bindingsCount) : m_device(device)
+{
+    std::vector<VkDescriptorPoolSize> sizes;
+    sizes.reserve(bindingsCount);
+    for (size_t i = 0; i < bindingsCount; i++)
+    {
+        VkDescriptorPoolSize size;
+        size.descriptorCount = bindings[i].descriptorCount;
+        size.type = bindings[i].descriptorType;
+    }
+
+    VkDescriptorPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+    poolInfo.maxSets = maxSets;
+    poolInfo.poolSizeCount = sizes.size();
+    poolInfo.pPoolSizes = sizes.data();
+
+    VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_handle), "failed to create descriptor pool!");
+}
+
+DescriptorPool::~DescriptorPool()
+{
+    vkDestroyDescriptorPool(m_device, m_handle, nullptr);
+}
+
+std::shared_ptr<DescriptorSet> DescriptorPool::allocateDescriptorSet(VkDescriptorSetLayout layout)
+{
+    VkDescriptorSetAllocateInfo allocInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+    allocInfo.descriptorPool = m_handle;
+    allocInfo.descriptorSetCount = 1u;
+    allocInfo.pSetLayouts = &layout;
+
+    VkDescriptorSet set;
+    VK_CHECK(vkAllocateDescriptorSets(m_device, nullptr, &set), "failed to allocate descriptor set!");
+    return std::make_shared<DescriptorSet>(m_device, set);
 }
 
 }

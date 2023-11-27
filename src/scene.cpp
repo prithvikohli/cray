@@ -113,6 +113,14 @@ void Scene::createMaterial(tinygltf::Model& model, tinygltf::Material& material)
     }
 
     m_materials.push_back(mat);
+
+    MaterialViews matViews;
+    matViews.albedo = m_rc->createImageView(*mat.albedo, VK_IMAGE_ASPECT_COLOR_BIT);
+    matViews.normal = m_rc->createImageView(*mat.normal, VK_IMAGE_ASPECT_COLOR_BIT);
+    matViews.metallicRoughness = m_rc->createImageView(*mat.metallicRoughness, VK_IMAGE_ASPECT_COLOR_BIT);
+    matViews.emissive = m_rc->createImageView(*mat.emissive, VK_IMAGE_ASPECT_COLOR_BIT);
+
+    m_materialViews.push_back(matViews);
 }
 
 void Scene::createMesh(tinygltf::Model& model, tinygltf::Mesh& mesh)
@@ -194,7 +202,7 @@ void Scene::createMesh(tinygltf::Model& model, tinygltf::Mesh& mesh)
         m_rc->copyStagingBuffer(*m.texCoordBuffer, *stagingBuf, stagingBuf->m_size);
     }
 
-    m.material = &m_materials[prim.material];
+    m.material = &m_materialViews[prim.material];
 
     m_meshes.push_back(m);
 }

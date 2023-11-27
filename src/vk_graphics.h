@@ -101,7 +101,69 @@ public:
 
     operator VkCommandBuffer() const { return m_handle; }
 
+    // non-owning
     VkCommandBuffer m_handle;
+};
+
+class PipelineLayout
+{
+public:
+    PipelineLayout(VkDevice device, const uint32_t** const shaderBinaries, const size_t* shaderSizes, const VkShaderStageFlags* shaderStages, const size_t shaderCount);
+    PipelineLayout(const PipelineLayout&) = delete;
+
+    ~PipelineLayout();
+
+    VkDescriptorSetLayout getDescriptorSetLayout() const { return m_descriptorSetLayout; }
+    VkPipelineLayout getHandle() const { return m_handle; }
+
+    PipelineLayout& operator=(const PipelineLayout&) = delete;
+    operator VkDescriptorSetLayout() const { return m_descriptorSetLayout; }
+    operator VkPipelineLayout() const { return m_handle; }
+
+    std::vector<VkDescriptorSetLayoutBinding> m_bindings;
+
+private:
+    VkDevice m_device;
+    VkDescriptorSetLayout m_descriptorSetLayout;
+    VkPipelineLayout m_handle;
+};
+
+class DescriptorSet
+{
+public:
+    DescriptorSet(VkDevice device, VkDescriptorSet descriptorSet) : m_device(device), m_handle(descriptorSet) {}
+
+    void setUniformBuffer(uint32_t binding, VkBuffer buf, VkDeviceSize range, VkDeviceSize offset = 0u) const;
+    void setCombinedImageSampler(uint32_t binding, VkImageView view, VkImageLayout layout, VkSampler sampler) const;
+    void setCombinedImageSampler(uint32_t binding, const vk::ImageView& view, VkSampler sampler) const { setCombinedImageSampler(binding, view.getHandle(), view.m_img->m_layout, sampler); }
+    void setImage(uint32_t binding, VkImageView view, VkImageLayout layout) const;
+    void setImage(uint32_t binding, const vk::ImageView& view) const { setImage(binding, view, view.m_img->m_layout); }
+    void setAccelerationStructure(uint32_t binding, VkAccelerationStructureKHR AS) const ;
+
+    operator VkDescriptorSet() const { return m_handle; }
+
+    // non-owning
+    VkDescriptorSet m_handle;
+
+private:
+    VkDevice m_device;
+};
+
+class DescriptorPool
+{
+public:
+    DescriptorPool(VkDevice device, uint32_t maxSets, const VkDescriptorSetLayoutBinding* bindings, const size_t bindingsCount);
+    DescriptorPool(const DescriptorPool&) = delete;
+
+    ~DescriptorPool();
+
+    std::shared_ptr<DescriptorSet> allocateDescriptorSet(VkDescriptorSetLayout layout);
+
+    DescriptorPool& operator=(const DescriptorPool&) = delete;
+
+private:
+    VkDevice m_device;
+    VkDescriptorPool m_handle;
 };
 
 class RenderContext
@@ -113,7 +175,7 @@ public:
     ~RenderContext();
 
     VkDevice getDevice() const { return m_device; }
-    VkCommandBuffer getCommandBuffer() const { return m_cmdBuf; }
+    CommandBuffer getCommandBuffer() const { return CommandBuffer(m_cmdBuf); }
     uint32_t acquireNextSwapchainImage(VkSemaphore acquiredSemaphore) const;
     VkImage getSwapchainImage(uint32_t idx) const { return m_swapchainImages[idx]; }
 

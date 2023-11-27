@@ -1,7 +1,6 @@
 #pragma once
 
 #include "gbuffer.h"
-#include "lighting.h"
 #include "scene.h"
 
 struct Camera
@@ -18,28 +17,26 @@ struct Uniforms
     glm::mat4 proj;
 };
 
-struct MaterialViews
-{
-    std::shared_ptr<vk::ImageView> albedo;
-    std::shared_ptr<vk::ImageView> metallicRoughness;
-    std::shared_ptr<vk::ImageView> normal;
-    std::shared_ptr<vk::ImageView> emissive;
-};
-
 class DrawableNode
 {
 public:
-    DrawableNode(Node* node, VkDevice device, VkPipelineLayout layout, VkDescriptorSet descriptorSet, std::shared_ptr<vk::Buffer> uniformsBuffer, MaterialViews matViews, VkSampler sampler);
+    DrawableNode(Node* node, std::shared_ptr<vk::DescriptorSet> descriptorSet, std::shared_ptr<vk::Buffer> uniformsBuffer, VkSampler sampler);
 
     void update(Camera cam) const;
-    void draw(VkCommandBuffer cmd) const;
+    void draw(VkCommandBuffer cmd, VkPipelineLayout layout) const;
 
 private:
     Node* m_node;
-    VkPipelineLayout m_layout;
-    VkDescriptorSet m_descriptorSet;
+    std::shared_ptr<vk::DescriptorSet> m_descriptorSet;
     std::shared_ptr<vk::Buffer> m_uniformsBuffer;
-    MaterialViews m_matViews;
+};
+
+struct GBufferBundle
+{
+    std::shared_ptr<vk::ImageView> depth;
+    std::shared_ptr<vk::ImageView> albedoMetallic;
+    std::shared_ptr<vk::ImageView> normalRoughness;
+    std::shared_ptr<vk::ImageView> emissive;
 };
 
 struct LightingUniforms
@@ -57,15 +54,16 @@ public:
     
     ~Renderer();
 
-    void loadScene(const std::string& gltfFilename, bool binary = false);
+    void loadScene(const std::string& gltfFilename, bool binary, const std::string& envmapHdrFilename);
     void render() const;
 
     Camera m_camera;
 
 private:
     vk::RenderContext* m_rc;
+    std::string m_shadersDir;
     VkDevice m_device;
-    VkCommandBuffer m_cmdBuf;
+    vk::CommandBuffer m_cmdBuf;
 
     std::shared_ptr<vk::Image> m_depthImg;
     std::shared_ptr<vk::Image> m_albedoMetallicImg;
@@ -73,19 +71,22 @@ private:
     std::shared_ptr<vk::Image> m_emissiveImg;
     GBufferBundle m_gbuffer;
 
+    VkFramebuffer m_framebuf;
+
     std::shared_ptr<vk::Image> m_lightingImg;
     std::shared_ptr<vk::ImageView> m_lightingView;
 
     std::unique_ptr<GBufferPass> m_gbufferPass;
-    std::unique_ptr<LightingPass> m_lightingPass;
+    std::unique_ptr<vk::PipelineLayout> m_lightingPipelineLayout;
+    VkPipeline m_lightingPipeline;
+    std::unique_ptr<vk::DescriptorPool> m_lightingDescriptorPool;
+    std::shared_ptr<vk::DescriptorSet> m_lightingDescriptorSet;
 
     VkSemaphore m_imageAcquiredSemaphore;
     VkSemaphore m_renderFinishedSemaphore;
     VkFence m_inFlightFence;
 
-    VkDescriptorPool m_descriptorPoolDrawables = VK_NULL_HANDLE;
-    VkDescriptorPool m_descriptorPoolLighting;
-    VkDescriptorSet m_descriptorSetLighting;
+    std::unique_ptr<vk::DescriptorPool> m_drawablesDescriptorPool;
 
     VkSampler m_samplerNearest;
     VkSampler m_samplerLinear;
@@ -99,8 +100,9 @@ private:
     std::shared_ptr<vk::Image> m_envMapImg;
     std::shared_ptr<vk::ImageView> m_envMapView;
 
+    void createGBuffer();
+    void setupLightingPass();
     void createSyncObjects();
-    void createLightingDescriptorSet();
     void createSamplers();
 
     DrawableNode createDrawableNode(Node* node) const;

@@ -17,6 +17,14 @@ struct Material
     std::shared_ptr<vk::Image> emissive;
 };
 
+struct MaterialViews
+{
+    std::shared_ptr<vk::ImageView> albedo;
+    std::shared_ptr<vk::ImageView> metallicRoughness;
+    std::shared_ptr<vk::ImageView> normal;
+    std::shared_ptr<vk::ImageView> emissive;
+};
+
 struct Mesh
 {
     uint32_t indexCount;
@@ -25,7 +33,7 @@ struct Mesh
     std::shared_ptr<vk::Buffer> normalBuffer;
     std::shared_ptr<vk::Buffer> texCoordBuffer;
 
-    Material* material;
+    MaterialViews* material;
 };
 
 struct Node
@@ -53,6 +61,7 @@ private:
     vk::RenderContext* m_rc;
 
     std::vector<Material> m_materials;
+    std::vector<MaterialViews> m_materialViews;
 
     void createMaterial(tinygltf::Model& model, tinygltf::Material& material);
     void createMesh(tinygltf::Model& model, tinygltf::Mesh& mesh);
