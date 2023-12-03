@@ -5,18 +5,18 @@
 
 #define GLM_FORCE_RADIANS
 #include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtx/quaternion.hpp>
-#include <glm/gtc/type_ptr.hpp>
 
 struct Material
 {
+    // TODO below should be clearly named as textures, e.g. texAlbedo
+    // and also include flat values if available, e.g. vec3 albedo
     std::shared_ptr<vk::Image> albedo;
     std::shared_ptr<vk::Image> metallicRoughness;
     std::shared_ptr<vk::Image> normal;
     std::shared_ptr<vk::Image> emissive;
 };
 
+// TODO maybe this should be the only thing exposed (i.e. this should be Material, rather than above) - store scene images somewhere else
 struct MaterialViews
 {
     std::shared_ptr<vk::ImageView> albedo;
@@ -28,9 +28,11 @@ struct MaterialViews
 struct Mesh
 {
     uint32_t indexCount;
+    VkIndexType indexType;
     std::shared_ptr<vk::Buffer> indexBuffer;
     std::shared_ptr<vk::Buffer> positionBuffer;
     std::shared_ptr<vk::Buffer> normalBuffer;
+    std::shared_ptr<vk::Buffer> tangentBuffer;
     std::shared_ptr<vk::Buffer> texCoordBuffer;
 
     MaterialViews* material;

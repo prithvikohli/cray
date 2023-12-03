@@ -635,6 +635,7 @@ void DescriptorSet::setCombinedImageSampler(uint32_t binding, VkImageView view, 
     write.dstSet = m_handle;
     write.dstBinding = binding;
     // TODO arrays
+    write.descriptorCount = 1u;
     write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     write.pImageInfo = &info;
 
@@ -649,6 +650,8 @@ void DescriptorSet::setImage(uint32_t binding, VkImageView view, VkImageLayout l
     VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
     write.dstSet = m_handle;
     write.dstBinding = binding;
+    // TODO arrays
+    write.descriptorCount = 1u;
     write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     write.pImageInfo = &info;
 
@@ -663,6 +666,8 @@ void DescriptorSet::setAccelerationStructure(uint32_t binding, VkAccelerationStr
     VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
     write.dstSet = m_handle;
     write.dstBinding = binding;
+    // TODO arrays
+    write.descriptorCount = 1u;
     write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     write.pNext = &writeAS;
     
@@ -701,7 +706,7 @@ std::shared_ptr<DescriptorSet> DescriptorPool::allocateDescriptorSet(VkDescripto
     allocInfo.pSetLayouts = &layout;
 
     VkDescriptorSet set;
-    VK_CHECK(vkAllocateDescriptorSets(m_device, nullptr, &set), "failed to allocate descriptor set!");
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, &set), "failed to allocate descriptor set!");
     return std::make_shared<DescriptorSet>(m_device, set);
 }
 

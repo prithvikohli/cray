@@ -3,13 +3,15 @@
 
 #include <fstream>
 
+#include <glm/gtc/matrix_transform.hpp>
+
 DrawableNode::DrawableNode(Node* node, std::shared_ptr<vk::DescriptorSet> descriptorSet, std::shared_ptr<vk::Buffer> uniformsBuffer, VkSampler sampler) : m_node(node), m_descriptorSet(descriptorSet), m_uniformsBuffer(uniformsBuffer)
 {
     m_descriptorSet->setUniformBuffer(0u, *m_uniformsBuffer, m_uniformsBuffer->m_size);
-    m_descriptorSet->setCombinedImageSampler(1u, *m_node->mesh->material->albedo, sampler);
-    m_descriptorSet->setCombinedImageSampler(2u, *m_node->mesh->material->metallicRoughness, sampler);
-    m_descriptorSet->setCombinedImageSampler(3u, *m_node->mesh->material->normal, sampler);
-    m_descriptorSet->setCombinedImageSampler(4u, *m_node->mesh->material->emissive, sampler);
+    m_descriptorSet->setCombinedImageSampler(1u, *m_node->mesh->material->albedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
+    m_descriptorSet->setCombinedImageSampler(2u, *m_node->mesh->material->metallicRoughness, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
+    m_descriptorSet->setCombinedImageSampler(3u, *m_node->mesh->material->normal, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
+    m_descriptorSet->setCombinedImageSampler(4u, *m_node->mesh->material->emissive, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
 }
 
 void DrawableNode::update(Camera cam) const
@@ -114,13 +116,13 @@ void Renderer::setupLightingPass()
 {
     // create lighting pipeline
     std::vector<uint32_t> lightingCode = readShader("lighting.comp.spv");
-    uint32_t* shaderBinary = lightingCode.data();
+    const uint32_t* shaderBinary = lightingCode.data();
     size_t shaderSize = lightingCode.size();
     VkShaderStageFlags shaderStage = VK_SHADER_STAGE_COMPUTE_BIT;
     m_lightingPipelineLayout = std::make_unique<vk::PipelineLayout>(m_device, &shaderBinary, &shaderSize, &shaderStage, 1u);
 
     VkShaderModuleCreateInfo shaderInfo{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-    shaderInfo.codeSize = shaderSize / 4u;
+    shaderInfo.codeSize = shaderSize * 4u;
     shaderInfo.pCode = lightingCode.data();
     VkShaderModule shaderModule;
     VK_CHECK(vkCreateShaderModule(m_device, &shaderInfo, nullptr, &shaderModule), "failed to create lighting shader module!");
@@ -147,12 +149,12 @@ void Renderer::setupLightingPass()
     m_lightingDescriptorPool = std::make_unique<vk::DescriptorPool>(m_device, 1u, m_lightingPipelineLayout->m_bindings.data(), m_lightingPipelineLayout->m_bindings.size());
     m_lightingDescriptorSet = m_lightingDescriptorPool->allocateDescriptorSet(*m_lightingPipelineLayout);
 
-    m_lightingDescriptorSet->setImage(0u, *m_lightingView);
-    m_lightingDescriptorSet->setCombinedImageSampler(1u, *m_gbuffer.depth, m_samplerNearest);
-    m_lightingDescriptorSet->setCombinedImageSampler(2u, *m_gbuffer.albedoMetallic, m_samplerNearest);
-    m_lightingDescriptorSet->setCombinedImageSampler(3u, *m_gbuffer.normalRoughness, m_samplerNearest);
+    m_lightingDescriptorSet->setImage(0u, *m_lightingView, VK_IMAGE_LAYOUT_GENERAL);
+    m_lightingDescriptorSet->setCombinedImageSampler(1u, *m_gbuffer.depth, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, m_samplerNearest);
+    m_lightingDescriptorSet->setCombinedImageSampler(2u, *m_gbuffer.albedoMetallic, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, m_samplerNearest);
+    m_lightingDescriptorSet->setCombinedImageSampler(3u, *m_gbuffer.normalRoughness, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, m_samplerNearest);
     m_lightingDescriptorSet->setUniformBuffer(4u, *m_lightingUniforms, m_lightingUniforms->m_size);
-    m_lightingDescriptorSet->setCombinedImageSampler(5u, *m_gbuffer.emissive, m_samplerNearest);
+    m_lightingDescriptorSet->setCombinedImageSampler(5u, *m_gbuffer.emissive, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, m_samplerNearest);
 }
 
 void Renderer::createSyncObjects()
@@ -196,32 +198,36 @@ void Renderer::loadScene(const std::string& gltfFilename, bool binary, const std
     m_camera.proj[1][1] *= -1;
 
     // update lighting uniforms
-    LightingUniforms lu;
-    lu.viewPos = m_camera.pos;
-    lu.invViewProj = glm::inverse(m_camera.proj * m_camera.view);
-    lu.invRes = glm::vec2(1.0f / m_rc->m_extent.width, 1.0f / m_rc->m_extent.height);
-    void* data = m_lightingUniforms->map();
-    memcpy(data, &lu, sizeof(LightingUniforms));
-    m_lightingUniforms->unmap();
+    {
+        LightingUniforms lu;
+        lu.viewPos = m_camera.pos;
+        lu.invViewProj = glm::inverse(m_camera.proj * m_camera.view);
+        lu.invRes = glm::vec2(1.0f / m_rc->m_extent.width, 1.0f / m_rc->m_extent.height);
+        void* data = m_lightingUniforms->map();
+        memcpy(data, &lu, sizeof(LightingUniforms));
+        m_lightingUniforms->unmap();
+    }
 
     // load environment map
-    int width, height, channels;
-    float* imgData = stbi_loadf(envmapHdrFilename.c_str(), &width, &height, &channels, 4);
-    if (imgData == nullptr)
-        throw std::runtime_error("failed to load environment map!");
+    {
+        int width, height, channels;
+        float* imgData = stbi_loadf(envmapHdrFilename.c_str(), &width, &height, &channels, 4);
+        if (imgData == nullptr)
+            throw std::runtime_error("failed to load environment map!");
 
-    VkExtent3D extent = { static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1u };
-    std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(VK_FORMAT_R32G32B32A32_SFLOAT, extent, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_TILING_LINEAR);
-    void* data = stagingImg->map();
-    memcpy(data, imgData, width * height * 16u);
-    stagingImg->unmap();
-    stbi_image_free(imgData);
+        VkExtent3D extent = { static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1u };
+        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(VK_FORMAT_R32G32B32A32_SFLOAT, extent, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_TILING_LINEAR);
+        void* data = stagingImg->map();
+        memcpy(data, imgData, width * height * 16u);
+        stagingImg->unmap();
+        stbi_image_free(imgData);
 
-    m_envMapImg = m_rc->createImage(VK_FORMAT_R32G32B32A32_SFLOAT, extent, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
-    m_rc->copyStagingImage(*m_envMapImg, *stagingImg, extent, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_envMapImg = m_rc->createImage(VK_FORMAT_R32G32B32A32_SFLOAT, extent, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m_rc->copyStagingImage(*m_envMapImg, *stagingImg, extent, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-    m_envMapView = m_rc->createImageView(*m_envMapImg, VK_IMAGE_ASPECT_COLOR_BIT);
-    m_lightingDescriptorSet->setCombinedImageSampler(6u, *m_envMapView, m_samplerNearest);
+        m_envMapView = m_rc->createImageView(*m_envMapImg, VK_IMAGE_ASPECT_COLOR_BIT);
+        m_lightingDescriptorSet->setCombinedImageSampler(6u, *m_envMapView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, m_samplerNearest);
+    }
 
     // build AS
     m_AS = std::make_unique<vk::AccelerationStructure>(m_rc, *m_scene);

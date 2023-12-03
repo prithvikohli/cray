@@ -135,9 +135,7 @@ public:
 
     void setUniformBuffer(uint32_t binding, VkBuffer buf, VkDeviceSize range, VkDeviceSize offset = 0u) const;
     void setCombinedImageSampler(uint32_t binding, VkImageView view, VkImageLayout layout, VkSampler sampler) const;
-    void setCombinedImageSampler(uint32_t binding, const vk::ImageView& view, VkSampler sampler) const { setCombinedImageSampler(binding, view.getHandle(), view.m_img->m_layout, sampler); }
     void setImage(uint32_t binding, VkImageView view, VkImageLayout layout) const;
-    void setImage(uint32_t binding, const vk::ImageView& view) const { setImage(binding, view, view.m_img->m_layout); }
     void setAccelerationStructure(uint32_t binding, VkAccelerationStructureKHR AS) const ;
 
     operator VkDescriptorSet() const { return m_handle; }

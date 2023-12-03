@@ -19,7 +19,7 @@ int main()
     vk::RenderContext rc(window);
     Renderer renderer(&rc, "src/shaders/");
 
-    renderer.loadScene("assets/scenes/DamagedHelmet.glb", true);
+    renderer.loadScene("assets/scenes/DamagedHelmet.glb", true, "assets/environment_maps/kart.hdr");
 
     while (!glfwWindowShouldClose(window))
     {

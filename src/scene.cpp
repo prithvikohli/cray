@@ -5,6 +5,19 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "tiny_gltf.h"
 
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/quaternion.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
+static void strided_copy(void* dst, void* src, size_t elem_count, size_t elem_size, size_t byte_stride)
+{
+
+    for (size_t i = 0; i < elem_count; i++)
+    {
+        memcpy((unsigned char*)dst + i * elem_size, (unsigned char*)src + i * byte_stride, elem_size);
+    }
+}
+
 Scene::Scene(vk::RenderContext* rc, const std::string& gltfFilename, bool binary) : m_rc(rc)
 {
     // parse file
@@ -12,17 +25,13 @@ Scene::Scene(vk::RenderContext* rc, const std::string& gltfFilename, bool binary
     tinygltf::TinyGLTF loader;
     std::string warn;
     std::string err;
-    bool ret;
-    if (binary)
-        ret = loader.LoadBinaryFromFile(&model, &err, &warn, gltfFilename);
-    else
-        ret = loader.LoadASCIIFromFile(&model, &err, &warn, gltfFilename);
+    bool ret = binary ? loader.LoadBinaryFromFile(&model, &err, &warn, gltfFilename) : loader.LoadASCIIFromFile(&model, &err, &warn, gltfFilename);
     if (!warn.empty())
         LOG(warn);
     if (!err.empty())
         LOGE(err);
     if (!ret)
-        throw std::runtime_error("failed to parse GLTF binary file!");
+        throw std::runtime_error("failed to parse GLTF file!");
 
     for (tinygltf::Material& mat : model.materials)
         createMaterial(model, mat);
@@ -31,7 +40,6 @@ Scene::Scene(vk::RenderContext* rc, const std::string& gltfFilename, bool binary
         createMesh(model, mesh);
 
     // only load default scene, fallback on scene 0
-    // TODO error check here
     tinygltf::Scene& scene = model.scenes[std::max(0, model.defaultScene)];
     for (int n : scene.nodes)
     {
@@ -48,35 +56,35 @@ Scene::~Scene()
 
 void Scene::createMaterial(tinygltf::Model& model, tinygltf::Material& material)
 {
-    // TODO error checking
     // TODO different GLTF image formats
     // TODO multiple tex coords
     // TODO texture factors
-    tinygltf::Texture& albedoTex = model.textures[material.pbrMetallicRoughness.baseColorTexture.index];
-    tinygltf::Texture& metallicRoughnessTex = model.textures[material.pbrMetallicRoughness.metallicRoughnessTexture.index];
-    tinygltf::Texture& normalTex = model.textures[material.normalTexture.index];
-    tinygltf::Texture& emissiveTex = model.textures[material.emissiveTexture.index];
-
     // TODO buffer views
-    tinygltf::Image& albedoImg = model.images[albedoTex.source];
-    tinygltf::Image& metallicRoughnessImg = model.images[metallicRoughnessTex.source];
-    tinygltf::Image& normalImg = model.images[normalTex.source];
-    tinygltf::Image& emissiveImg = model.images[emissiveTex.source];
 
     Material mat;
+    int idx = material.pbrMetallicRoughness.baseColorTexture.index;
+    if (idx > -1)
     {
+        tinygltf::Texture& albedoTex = model.textures[idx];
+        tinygltf::Image& albedoImg = model.images[albedoTex.source];
+
         VkExtent3D extent = { static_cast<uint32_t>(albedoImg.width), static_cast<uint32_t>(albedoImg.height), 1u };
-        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_TILING_LINEAR);
+        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(VK_FORMAT_R8G8B8A8_SRGB, extent, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_TILING_LINEAR);
 
         void* data = stagingImg->map();
         memcpy(data, albedoImg.image.data(), albedoImg.image.size());
         stagingImg->unmap();
 
-        mat.albedo = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        mat.albedo = m_rc->createImage(VK_FORMAT_R8G8B8A8_SRGB, extent, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
         m_rc->copyStagingImage(*mat.albedo, *stagingImg, extent, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
+    idx = material.pbrMetallicRoughness.metallicRoughnessTexture.index;
+    if (idx > -1)
     {
+        tinygltf::Texture& metallicRoughnessTex = model.textures[idx];
+        tinygltf::Image& metallicRoughnessImg = model.images[metallicRoughnessTex.source];
+        // TODO 2 channels w/ 16-bits per channel?
         VkExtent3D extent = { static_cast<uint32_t>(metallicRoughnessImg.width), static_cast<uint32_t>(metallicRoughnessImg.height), 1u };
         std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_TILING_LINEAR);
 
@@ -88,7 +96,12 @@ void Scene::createMaterial(tinygltf::Model& model, tinygltf::Material& material)
         m_rc->copyStagingImage(*mat.metallicRoughness, *stagingImg, extent, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
+    idx = material.normalTexture.index;
+    if (idx > -1)
     {
+        tinygltf::Texture& normalTex = model.textures[idx];
+        tinygltf::Image& normalImg = model.images[normalTex.source];
+
         VkExtent3D extent = { static_cast<uint32_t>(normalImg.width), static_cast<uint32_t>(normalImg.height), 1u };
         std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_TILING_LINEAR);
 
@@ -100,25 +113,34 @@ void Scene::createMaterial(tinygltf::Model& model, tinygltf::Material& material)
         m_rc->copyStagingImage(*mat.normal, *stagingImg, extent, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
+    idx = material.emissiveTexture.index;
+    if (idx > -1)
     {
+        tinygltf::Texture& emissiveTex = model.textures[idx];
+        tinygltf::Image& emissiveImg = model.images[emissiveTex.source];
+
         VkExtent3D extent = { static_cast<uint32_t>(emissiveImg.width), static_cast<uint32_t>(emissiveImg.height), 1u };
-        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_TILING_LINEAR);
+        std::shared_ptr<vk::Image> stagingImg = m_rc->createImage(VK_FORMAT_R8G8B8A8_SRGB, extent, VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, VK_IMAGE_LAYOUT_PREINITIALIZED, VK_IMAGE_TILING_LINEAR);
 
         void* data = stagingImg->map();
         memcpy(data, emissiveImg.image.data(), emissiveImg.image.size());
         stagingImg->unmap();
 
-        mat.emissive = m_rc->createImage(VK_FORMAT_R8G8B8A8_UNORM, extent, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        mat.emissive = m_rc->createImage(VK_FORMAT_R8G8B8A8_SRGB, extent, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
         m_rc->copyStagingImage(*mat.emissive, *stagingImg, extent, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
     m_materials.push_back(mat);
 
     MaterialViews matViews;
-    matViews.albedo = m_rc->createImageView(*mat.albedo, VK_IMAGE_ASPECT_COLOR_BIT);
-    matViews.normal = m_rc->createImageView(*mat.normal, VK_IMAGE_ASPECT_COLOR_BIT);
-    matViews.metallicRoughness = m_rc->createImageView(*mat.metallicRoughness, VK_IMAGE_ASPECT_COLOR_BIT);
-    matViews.emissive = m_rc->createImageView(*mat.emissive, VK_IMAGE_ASPECT_COLOR_BIT);
+    if (mat.albedo)
+        matViews.albedo = m_rc->createImageView(*mat.albedo, VK_IMAGE_ASPECT_COLOR_BIT);
+    if (mat.normal)
+        matViews.normal = m_rc->createImageView(*mat.normal, VK_IMAGE_ASPECT_COLOR_BIT);
+    if (mat.metallicRoughness)
+        matViews.metallicRoughness = m_rc->createImageView(*mat.metallicRoughness, VK_IMAGE_ASPECT_COLOR_BIT);
+    if (mat.emissive)
+        matViews.emissive = m_rc->createImageView(*mat.emissive, VK_IMAGE_ASPECT_COLOR_BIT);
 
     m_materialViews.push_back(matViews);
 }
@@ -136,69 +158,137 @@ void Scene::createMesh(tinygltf::Model& model, tinygltf::Mesh& mesh)
         }
     }
     if (primIdx == -1)
-        throw std::runtime_error("unsupported GLTF mesh primitive mode!");
+        throw std::runtime_error("unsupported GLTF mesh primitive mode, or primitive mode unspecified!");
 
     tinygltf::Primitive& prim = mesh.primitives[primIdx];
 
-    // TODO error checks
-    // TODO different GLTF data formats
     tinygltf::Accessor& indexAccessor = model.accessors[prim.indices];
     tinygltf::Accessor& positionAccessor = model.accessors[prim.attributes["POSITION"]];
     tinygltf::Accessor& normalAccessor = model.accessors[prim.attributes["NORMAL"]];
+    // TODO what if no tangents
+    tinygltf::Accessor& tangentAccessor = model.accessors[prim.attributes["TANGENT"]];
+    // TODO multiple texture coordinates
     tinygltf::Accessor& texCoordAccessor = model.accessors[prim.attributes["TEXCOORD_0"]];
 
     tinygltf::BufferView& indexView = model.bufferViews[indexAccessor.bufferView];
     tinygltf::BufferView& positionView = model.bufferViews[positionAccessor.bufferView];
     tinygltf::BufferView& normalView = model.bufferViews[normalAccessor.bufferView];
+    tinygltf::BufferView& tangentView = model.bufferViews[tangentAccessor.bufferView];
     tinygltf::BufferView& texCoordView = model.bufferViews[texCoordAccessor.bufferView];
 
     tinygltf::Buffer& indexBuf = model.buffers[indexView.buffer];
     tinygltf::Buffer& positionBuf = model.buffers[positionView.buffer];
     tinygltf::Buffer& normalBuf = model.buffers[normalView.buffer];
+    tinygltf::Buffer& tangentBuf = model.buffers[tangentView.buffer];
     tinygltf::Buffer& texCoordBuf = model.buffers[texCoordView.buffer];
 
     // TODO don't duplicate or allocate too much data unnecessarily
     Mesh m;
     m.indexCount = static_cast<uint32_t>(indexAccessor.count);
+    m.indexType = indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
     {
-        std::shared_ptr<vk::Buffer> stagingBuf = m_rc->createBuffer(static_cast<VkDeviceSize>(indexView.byteLength), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        size_t indicesByteCount = m.indexType == VK_INDEX_TYPE_UINT16 ? 2u * m.indexCount : 4u * m.indexCount;
+        std::shared_ptr<vk::Buffer> stagingBuf = m_rc->createBuffer(static_cast<VkDeviceSize>(indicesByteCount), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         void* data = stagingBuf->map();
-        // TODO missing byte stride
-        // TODO accessor byte offset and count
-        memcpy(data, indexBuf.data.data() + indexView.byteOffset, indexView.byteLength);
+
+        size_t indicesByteOffset = indexAccessor.byteOffset + indexView.byteOffset;
+        unsigned char* bufData = indexBuf.data.data() + indicesByteOffset;
+        if (indexView.byteStride > 0u)
+        {
+            strided_copy(data, bufData, m.indexCount, m.indexType == VK_INDEX_TYPE_UINT16 ? 2u : 4u, indexView.byteStride);
+        }
+        else
+        {
+            memcpy(data, bufData, indicesByteCount);
+        }
         stagingBuf->unmap();
 
-        m.indexBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(indexView.byteLength), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m.indexBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(indicesByteCount), VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
         m_rc->copyStagingBuffer(*m.indexBuffer, *stagingBuf, stagingBuf->m_size);
     }
 
     {
-        std::shared_ptr<vk::Buffer> stagingBuf = m_rc->createBuffer(static_cast<VkDeviceSize>(positionView.byteLength), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        size_t positionByteCount = 3u * sizeof(float) * positionAccessor.count;
+        std::shared_ptr<vk::Buffer> stagingBuf = m_rc->createBuffer(static_cast<VkDeviceSize>(positionByteCount), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         void* data = stagingBuf->map();
-        memcpy(data, positionBuf.data.data() + positionView.byteOffset, positionView.byteLength);
+
+        size_t positionByteOffset = positionAccessor.byteOffset + positionView.byteOffset;
+        unsigned char* bufData = positionBuf.data.data() + positionByteOffset;
+        if (positionView.byteStride > 0u)
+        {
+            strided_copy(data, bufData, positionAccessor.count, 3u * sizeof(float), positionView.byteStride);
+        }
+        else
+        {
+            memcpy(data, bufData, positionByteCount);
+        }
         stagingBuf->unmap();
 
-        m.positionBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(positionView.byteLength), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m.positionBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(positionByteCount), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
         m_rc->copyStagingBuffer(*m.positionBuffer, *stagingBuf, stagingBuf->m_size);
     }
 
     {
-        std::shared_ptr<vk::Buffer> stagingBuf = m_rc->createBuffer(static_cast<VkDeviceSize>(normalView.byteLength), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        size_t normalByteCount = 3u * sizeof(float) * normalAccessor.count;
+        std::shared_ptr<vk::Buffer> stagingBuf = m_rc->createBuffer(static_cast<VkDeviceSize>(normalByteCount), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         void* data = stagingBuf->map();
-        memcpy(data, normalBuf.data.data() + normalView.byteOffset, normalView.byteLength);
+
+        size_t normalByteOffset = normalAccessor.byteOffset + normalView.byteOffset;
+        unsigned char* bufData = normalBuf.data.data() + normalByteOffset;
+        if (normalView.byteStride > 0u)
+        {
+            strided_copy(data, bufData, normalAccessor.count, 3u * sizeof(float), normalView.byteStride);
+        }
+        else
+        {
+            memcpy(data, bufData, normalByteCount);
+        }
         stagingBuf->unmap();
 
-        m.normalBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(normalView.byteLength), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m.normalBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(normalByteCount), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
         m_rc->copyStagingBuffer(*m.normalBuffer, *stagingBuf, stagingBuf->m_size);
     }
 
     {
-        std::shared_ptr<vk::Buffer> stagingBuf = m_rc->createBuffer(static_cast<VkDeviceSize>(texCoordView.byteLength), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        size_t tangentByteCount = 4u * sizeof(float) * tangentAccessor.count;
+        std::shared_ptr<vk::Buffer> stagingBuf = m_rc->createBuffer(static_cast<VkDeviceSize>(tangentByteCount), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
         void* data = stagingBuf->map();
-        memcpy(data, texCoordBuf.data.data() + texCoordView.byteOffset, texCoordView.byteLength);
+
+        size_t tangentByteOffset = tangentAccessor.byteOffset + tangentView.byteOffset;
+        unsigned char* bufData = tangentBuf.data.data() + tangentByteOffset;
+        if (tangentView.byteStride > 0u)
+        {
+            strided_copy(data, bufData, tangentAccessor.count, 4u * sizeof(float), tangentView.byteStride);
+        }
+        else
+        {
+            memcpy(data, bufData, tangentByteCount);
+        }
         stagingBuf->unmap();
 
-        m.texCoordBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(texCoordView.byteLength), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m.tangentBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(tangentByteCount), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
+        m_rc->copyStagingBuffer(*m.tangentBuffer, *stagingBuf, stagingBuf->m_size);
+    }
+
+    {
+        // TODO different component types?
+        size_t texCoordByteCount = 2u * sizeof(float) * texCoordAccessor.count;
+        std::shared_ptr<vk::Buffer> stagingBuf = m_rc->createBuffer(static_cast<VkDeviceSize>(texCoordByteCount), VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        void* data = stagingBuf->map();
+
+        size_t texCoordByteOffset = texCoordAccessor.byteOffset + texCoordView.byteOffset;
+        unsigned char* bufData = texCoordBuf.data.data() + texCoordByteOffset;
+        if (texCoordView.byteStride > 0u)
+        {
+            strided_copy(data, bufData, texCoordAccessor.count, 2u * sizeof(float), texCoordView.byteStride);
+        }
+        else
+        {
+            memcpy(data, bufData, texCoordByteCount);
+        }
+        stagingBuf->unmap();
+
+        m.texCoordBuffer = m_rc->createBuffer(static_cast<VkDeviceSize>(texCoordByteCount), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
         m_rc->copyStagingBuffer(*m.texCoordBuffer, *stagingBuf, stagingBuf->m_size);
     }
 
@@ -265,9 +355,7 @@ void vk::AccelerationStructure::buildBlases(const Scene& scene)
 
     for (const Mesh& m : scene.m_meshes)
     {
-        // TODO do we have to ensure buffers we get device addresses for are actually in device memory?
-        VkBufferDeviceAddressInfo addrInfo{};
-        addrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+        VkBufferDeviceAddressInfo addrInfo{ VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
         addrInfo.buffer = *m.positionBuffer;
         VkDeviceOrHostAddressConstKHR vertexBufferAddr;
         vertexBufferAddr.deviceAddress = vkGetBufferDeviceAddress(m_rc->getDevice(), &addrInfo);
@@ -276,28 +364,23 @@ void vk::AccelerationStructure::buildBlases(const Scene& scene)
         VkDeviceOrHostAddressConstKHR indexBufferAddr;
         indexBufferAddr.deviceAddress = vkGetBufferDeviceAddress(m_rc->getDevice(), &addrInfo);
 
-        // TODO different data formats
-        VkAccelerationStructureGeometryTrianglesDataKHR trianglesData{};
-        trianglesData.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+        VkAccelerationStructureGeometryTrianglesDataKHR trianglesData{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR };
         trianglesData.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
         trianglesData.vertexData = vertexBufferAddr;
         trianglesData.maxVertex = (m.positionBuffer->m_size / 12u) - 1u;
         trianglesData.vertexStride = 12u;
-        trianglesData.indexType = VK_INDEX_TYPE_UINT16;
+        trianglesData.indexType = m.indexType;
         trianglesData.indexData = indexBufferAddr;
 
         VkAccelerationStructureGeometryDataKHR geomData{};
         geomData.triangles = trianglesData;
 
-        VkAccelerationStructureGeometryKHR geom{};
-        geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+        VkAccelerationStructureGeometryKHR geom{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
         geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
         geom.geometry = geomData;
         geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
 
-        VkAccelerationStructureBuildGeometryInfoKHR buildInfo{};
-        buildInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
-        buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+        VkAccelerationStructureBuildGeometryInfoKHR buildInfo{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
         buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
         buildInfo.geometryCount = 1u;
         buildInfo.pGeometries = &geom;
@@ -308,8 +391,7 @@ void vk::AccelerationStructure::buildBlases(const Scene& scene)
 
         std::shared_ptr<vk::Buffer> ASBuf = m_rc->createBuffer(sizeInfo.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, 0u, 0u);
 
-        VkAccelerationStructureCreateInfoKHR ASInfo{};
-        ASInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+        VkAccelerationStructureCreateInfoKHR ASInfo{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
         ASInfo.buffer = *ASBuf;
         ASInfo.offset = 0u;
         ASInfo.size = sizeInfo.accelerationStructureSize;
@@ -374,7 +456,7 @@ void vk::AccelerationStructure::buildTlas(const Scene& scene)
         instances.push_back(std::move(instance));
     }
 
-    std::shared_ptr<Buffer> instancesDataBuf = m_rc->createBuffer(sizeof(VkAccelerationStructureInstanceKHR) * instances.size(), VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 8u);
+    std::shared_ptr<Buffer> instancesDataBuf = m_rc->createBuffer(sizeof(VkAccelerationStructureInstanceKHR) * instances.size(), VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, 8u);
     void* data = instancesDataBuf->map();
     memcpy(data, instances.data(), sizeof(VkAccelerationStructureInstanceKHR) * instances.size());
     instancesDataBuf->unmap();

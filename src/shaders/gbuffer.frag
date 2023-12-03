@@ -26,6 +26,7 @@ void main()
     vec3 bitangent = cross(normal, tangent);
 
     vec3 perturb = normalize(texture(normalMap, v_texCoord).xyz * 2.0 - 1.0);
+    // TODO remove this normalize?
     vec3 n = normalize(normal * perturb.z + tangent * perturb.x + bitangent * perturb.y);
 
     normalRoughnessOut.rgb = (n + 1.0) * 0.5;

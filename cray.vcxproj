@@ -21,7 +21,6 @@
   <ItemGroup>
     <ClInclude Include="src\gbuffer.h" />
     <ClInclude Include="src\json.hpp" />
-    <ClInclude Include="src\lighting.h" />
     <ClInclude Include="src\renderer.h" />
     <ClInclude Include="src\scene.h" />
     <ClInclude Include="src\stb_image.h" />
@@ -32,7 +31,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\gbuffer.cpp" />
-    <ClCompile Include="src\lighting.cpp" />
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\renderer.cpp" />
     <ClCompile Include="src\scene.cpp" />
