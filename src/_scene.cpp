@@ -381,6 +381,7 @@ void vk::AccelerationStructure::buildBlases(const Scene& scene)
         geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
 
         VkAccelerationStructureBuildGeometryInfoKHR buildInfo{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
+        buildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
         buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
         buildInfo.geometryCount = 1u;
         buildInfo.pGeometries = &geom;

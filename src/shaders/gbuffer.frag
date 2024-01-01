@@ -4,7 +4,8 @@
 
 layout(location = 0) in vec3 v_pos;
 layout(location = 1) in vec3 v_normal;
-layout(location = 2) in vec2 v_texCoord;
+layout(location = 2) in vec4 v_tangent;
+layout(location = 3) in vec2 v_texCoord;
 
 layout(location = 0) out vec4 albedoMetallicOut;
 layout(location = 1) out vec4 normalRoughnessOut;
@@ -21,9 +22,9 @@ void main()
     albedoMetallicOut.a = texture(metallicRoughness, v_texCoord).b;
 
     vec3 normal = normalize(v_normal);
-    vec3 u = abs(normal.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
-    vec3 tangent = normalize(cross(normal, u));
-    vec3 bitangent = cross(normal, tangent);
+    // TODO remove normalize tangent?
+    vec3 tangent = normalize(v_tangent.xyz);
+    vec3 bitangent = cross(normal.xyz, tangent) * v_tangent.w;
 
     vec3 perturb = normalize(texture(normalMap, v_texCoord).xyz * 2.0 - 1.0);
     // TODO remove this normalize?
@@ -32,5 +33,5 @@ void main()
     normalRoughnessOut.rgb = (n + 1.0) * 0.5;
     normalRoughnessOut.a = texture(metallicRoughness, v_texCoord).g;
 
-    emissiveOut = texture(emissive, v_texCoord);
+    //emissiveOut = texture(emissive, v_texCoord);
 }

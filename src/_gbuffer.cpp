@@ -18,8 +18,8 @@ void GBufferPass::createRenderPass(const vk::Image* depthImage, const std::vecto
     VkAttachmentDescription depthAttachment{};
     depthAttachment.format = depthImage->m_imageInfo.format;
     depthAttachment.samples = depthImage->m_imageInfo.samples;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
     depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
@@ -127,7 +127,7 @@ void GBufferPass::createPipeline(const std::vector<uint32_t>& vertCode, const st
     VkVertexInputBindingDescription vertexBindingTangent{};
     vertexBindingTangent.binding = 2u;
     vertexBindingTangent.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    vertexBindingTangent.stride = 12u;
+    vertexBindingTangent.stride = 16u;
     VkVertexInputBindingDescription vertexBindingTexCoord{};
     vertexBindingTexCoord.binding = 3u;
     vertexBindingTexCoord.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
@@ -234,10 +234,10 @@ void GBufferPass::begin(VkCommandBuffer cmdBuf, VkFramebuffer framebuf) const
     clearDepth.depth = 1.0f;
 
     VkClearColorValue clearCol{};
-    clearCol.float32[0] = 0.0f;
-    clearCol.float32[1] = 0.0f;
-    clearCol.float32[2] = 0.0f;
-    clearCol.float32[3] = 0.0f;
+    clearCol.float32[0] = 1.0f;
+    clearCol.float32[1] = 1.0f;
+    clearCol.float32[2] = 1.0f;
+    clearCol.float32[3] = 1.0f;
 
     std::vector<VkClearValue> clearValues(1u + m_colorAttachmentCount);
     VkClearValue d;

@@ -8,10 +8,15 @@
 DrawableNode::DrawableNode(Node* node, std::shared_ptr<vk::DescriptorSet> descriptorSet, std::shared_ptr<vk::Buffer> uniformsBuffer, VkSampler sampler) : m_node(node), m_descriptorSet(descriptorSet), m_uniformsBuffer(uniformsBuffer)
 {
     m_descriptorSet->setUniformBuffer(0u, *m_uniformsBuffer, m_uniformsBuffer->m_size);
-    m_descriptorSet->setCombinedImageSampler(1u, *m_node->mesh->material->albedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
-    m_descriptorSet->setCombinedImageSampler(2u, *m_node->mesh->material->metallicRoughness, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
-    m_descriptorSet->setCombinedImageSampler(3u, *m_node->mesh->material->normal, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
-    m_descriptorSet->setCombinedImageSampler(4u, *m_node->mesh->material->emissive, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
+    MaterialViews* material = m_node->mesh->material;
+    if (material->albedo)
+        m_descriptorSet->setCombinedImageSampler(1u, *material->albedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
+    if (material->metallicRoughness)
+        m_descriptorSet->setCombinedImageSampler(2u, *material->metallicRoughness, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
+    if (material->normal)
+        m_descriptorSet->setCombinedImageSampler(3u, *material->normal, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
+    if (material->emissive)
+        m_descriptorSet->setCombinedImageSampler(4u, *material->emissive, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, sampler);
 }
 
 void DrawableNode::update(Camera cam) const
@@ -29,11 +34,10 @@ void DrawableNode::update(Camera cam) const
 
 void DrawableNode::draw(VkCommandBuffer cmd, VkPipelineLayout layout) const
 {
-    VkBuffer buffers[] = { m_node->mesh->positionBuffer->getHandle(), m_node->mesh->normalBuffer->getHandle(), m_node->mesh->texCoordBuffer->getHandle() };
-    VkDeviceSize offsets[] = { 0u, 0u, 0u };
+    VkBuffer buffers[] = { m_node->mesh->positionBuffer->getHandle(), m_node->mesh->normalBuffer->getHandle(), m_node->mesh->tangentBuffer->getHandle(), m_node->mesh->texCoordBuffer->getHandle() };
+    VkDeviceSize offsets[] = { 0u, 0u, 0u, 0u };
     vkCmdBindVertexBuffers(cmd, 0u, ARRAY_LENGTH(buffers), buffers, offsets);
-    // TODO different index data types
-    vkCmdBindIndexBuffer(cmd, *m_node->mesh->indexBuffer, 0u, VK_INDEX_TYPE_UINT16);
+    vkCmdBindIndexBuffer(cmd, *m_node->mesh->indexBuffer, 0u, m_node->mesh->indexType);
 
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0u, 1u, &m_descriptorSet->m_handle, 0u, nullptr);
     vkCmdDrawIndexed(cmd, m_node->mesh->indexCount, 1u, 0u, 0u, 0u);
@@ -192,8 +196,8 @@ void Renderer::loadScene(const std::string& gltfFilename, bool binary, const std
     }
 
     // TODO make configurable
-    m_camera.pos = glm::vec3(-3.0f, 1.0f, 0.0f);
-    m_camera.view = glm::lookAt(m_camera.pos, glm::vec3(0.0f, 0.0, 0.0f), glm::vec3(0.0f, 0.0f, -1.0f));
+    m_camera.pos = glm::vec3(0.0f, 0.0f, -1.0f);
+    m_camera.view = glm::lookAt(m_camera.pos, glm::vec3(0.0f, 0.0, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     m_camera.proj = glm::perspective(glm::radians(45.0f), m_rc->m_extent.width / (float)m_rc->m_extent.height, 0.1f, 100.0f);
     m_camera.proj[1][1] *= -1;
 
@@ -256,7 +260,7 @@ void Renderer::render() const
     m_gbufferPass->end(m_cmdBuf);
 
     // lighting pass
-    vkCmdBindPipeline(m_cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_lightingPipeline);
+    /*vkCmdBindPipeline(m_cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, m_lightingPipeline);
     vkCmdBindDescriptorSets(m_cmdBuf, VK_PIPELINE_BIND_POINT_COMPUTE, *m_lightingPipelineLayout, 0u, 1u, &m_lightingDescriptorSet->m_handle, 0u, nullptr);
 
     m_cmdBuf.imageMemoryBarrier(*m_lightingView, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0u, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_IMAGE_LAYOUT_GENERAL);
@@ -301,7 +305,7 @@ void Renderer::render() const
     imageMemoryBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     imageMemoryBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-    vkCmdPipelineBarrier(m_cmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+    vkCmdPipelineBarrier(m_cmdBuf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);*/
 
     VK_CHECK(vkEndCommandBuffer(m_cmdBuf), "renderer failed to end command buffer!");
 
