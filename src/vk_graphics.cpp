@@ -91,7 +91,7 @@ bool Instance::create()
 
 Device::Device(Instance* instance) : m_instance(instance)
 {
-    m_createInfo.pEnabledFeatures = &m_enabledFeatures;
+    m_createInfo.pNext = &m_enabledFeatures;
 }
 
 Device::~Device()
@@ -255,20 +255,24 @@ Swapchain::~Swapchain()
         destroy();
 }
 
-bool Swapchain::create(VkSurfaceKHR surface, VkImageUsageFlags usage)
+bool Swapchain::create(GLFWwindow* window, VkImageUsageFlags usage)
 {
     if (m_handle != VK_NULL_HANDLE)
         return false;
 
-    VkSurfaceCapabilitiesKHR surfaceCapabilities;
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_device->m_physicalDevice, surface, &surfaceCapabilities);
+    VkResult res = glfwCreateWindowSurface(*m_device->m_instance, window, nullptr, &m_surface);
+    if (res != VK_SUCCESS)
+        return false;
 
-    m_createInfo.surface = surface;
+    VkSurfaceCapabilitiesKHR surfaceCapabilities;
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_device->m_physicalDevice, m_surface, &surfaceCapabilities);
+
+    m_createInfo.surface = m_surface;
     m_createInfo.minImageCount = surfaceCapabilities.minImageCount + 1u;
     m_createInfo.imageExtent = surfaceCapabilities.currentExtent;
     m_createInfo.imageUsage = usage;
 
-    VkResult res = vkCreateSwapchainKHR(*m_device, &m_createInfo, nullptr, &m_handle);
+    res = vkCreateSwapchainKHR(*m_device, &m_createInfo, nullptr, &m_handle);
     if (res != VK_SUCCESS)
         return false;
 
@@ -278,6 +282,12 @@ bool Swapchain::create(VkSurfaceKHR surface, VkImageUsageFlags usage)
     vkGetSwapchainImagesKHR(*m_device, m_handle, &imagesCount, m_images.data());
 
     return true;
+}
+
+void Swapchain::destroy()
+{
+    vkDestroySwapchainKHR(*m_device, m_handle, nullptr);
+    vkDestroySurfaceKHR(*m_device->m_instance, m_surface, nullptr);
 }
 
 bool Swapchain::acquireNextImage(uint32_t* idx, VkSemaphore acquiredSemaphore) const
@@ -296,6 +306,7 @@ bool Swapchain::present(VkQueue queue, uint32_t idx, VkSemaphore waitSemaphore) 
     presentInfo.pImageIndices = &idx;
 
     VkResult res = vkQueuePresentKHR(queue, &presentInfo);
+    return res == VK_SUCCESS;
 }
 
 Buffer::Buffer(VmaAllocator allocator) : m_allocator(allocator)
@@ -458,7 +469,7 @@ PipelineLayout::~PipelineLayout()
         destroy();
 }
 
-bool PipelineLayout::create(const std::unordered_set<Shader>& shaders)
+bool PipelineLayout::create(const std::unordered_set<Shader*>& shaders)
 {
     if (m_handle != VK_NULL_HANDLE)
         return false;
@@ -466,9 +477,9 @@ bool PipelineLayout::create(const std::unordered_set<Shader>& shaders)
     // create push descriptor set layout
     // implicity set 0
     std::vector<VkDescriptorSetLayoutBinding> bindings;
-    for (const Shader& sh : shaders)
+    for (const Shader* sh : shaders)
     {
-        spirv_cross::CompilerGLSL comp(sh.m_code.data(), sh.m_code.size());
+        spirv_cross::CompilerGLSL comp(sh->m_code.data(), sh->m_code.size());
         spirv_cross::ShaderResources resources = comp.get_shader_resources();
         for (auto& u : resources.uniform_buffers)
         {
@@ -480,7 +491,7 @@ bool PipelineLayout::create(const std::unordered_set<Shader>& shaders)
             uniformBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             // TODO arrays
             uniformBinding.descriptorCount = 1u;
-            uniformBinding.stageFlags = sh.m_shaderStageInfo.stage;
+            uniformBinding.stageFlags = sh->m_shaderStageInfo.stage;
             uniformBinding.binding = comp.get_decoration(u.id, spv::DecorationBinding);
 
             bindings.push_back(uniformBinding);
@@ -496,7 +507,7 @@ bool PipelineLayout::create(const std::unordered_set<Shader>& shaders)
             imgBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             // TODO arrays
             imgBinding.descriptorCount = 1u;
-            imgBinding.stageFlags = sh.m_shaderStageInfo.stage;
+            imgBinding.stageFlags = sh->m_shaderStageInfo.stage;
             imgBinding.binding = comp.get_decoration(img.id, spv::DecorationBinding);
 
             bindings.push_back(imgBinding);
@@ -512,7 +523,7 @@ bool PipelineLayout::create(const std::unordered_set<Shader>& shaders)
             imgBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
             // TODO arrays
             imgBinding.descriptorCount = 1u;
-            imgBinding.stageFlags = sh.m_shaderStageInfo.stage;
+            imgBinding.stageFlags = sh->m_shaderStageInfo.stage;
             imgBinding.binding = comp.get_decoration(img.id, spv::DecorationBinding);
 
             bindings.push_back(imgBinding);
@@ -528,7 +539,7 @@ bool PipelineLayout::create(const std::unordered_set<Shader>& shaders)
             asBinding.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
             // TODO arrays
             asBinding.descriptorCount = 1u;
-            asBinding.stageFlags = sh.m_shaderStageInfo.stage;
+            asBinding.stageFlags = sh->m_shaderStageInfo.stage;
             asBinding.binding = comp.get_decoration(as.id, spv::DecorationBinding);
 
             bindings.push_back(asBinding);
@@ -561,42 +572,6 @@ void PipelineLayout::destroy()
 
 GraphicsPipeline::GraphicsPipeline(Device* device) : m_device(device)
 {
-    //VkVertexInputBindingDescription vertexBindingPosition{};
-    //vertexBindingPosition.binding = 0u;
-    //vertexBindingPosition.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    //vertexBindingPosition.stride = 12u;
-    //VkVertexInputBindingDescription vertexBindingNormal{};
-    //vertexBindingNormal.binding = 1u;
-    //vertexBindingNormal.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    //vertexBindingNormal.stride = 12u;
-    //VkVertexInputBindingDescription vertexBindingTangent{};
-    //vertexBindingTangent.binding = 2u;
-    //vertexBindingTangent.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    //vertexBindingTangent.stride = 16u;
-    //VkVertexInputBindingDescription vertexBindingTexCoord{};
-    //vertexBindingTexCoord.binding = 3u;
-    //vertexBindingTexCoord.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    //vertexBindingTexCoord.stride = 8u;
-    //VkVertexInputBindingDescription vertexBindings[] = { vertexBindingPosition, vertexBindingNormal, vertexBindingTangent, vertexBindingTexCoord };
-
-    //VkVertexInputAttributeDescription vertexAttributePosition{};
-    //vertexAttributePosition.location = 0u;
-    //vertexAttributePosition.binding = 0u;
-    //vertexAttributePosition.format = VK_FORMAT_R32G32B32_SFLOAT;
-    //VkVertexInputAttributeDescription vertexAttributeNormal{};
-    //vertexAttributeNormal.location = 1u;
-    //vertexAttributeNormal.binding = 1u;
-    //vertexAttributeNormal.format = VK_FORMAT_R32G32B32_SFLOAT;
-    //VkVertexInputAttributeDescription vertexAttributeTangent{};
-    //vertexAttributeTangent.location = 2u;
-    //vertexAttributeTangent.binding = 2u;
-    //vertexAttributeTangent.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    //VkVertexInputAttributeDescription vertexAttributeTexCoord{};
-    //vertexAttributeTexCoord.location = 3u;
-    //vertexAttributeTexCoord.binding = 3u;
-    //vertexAttributeTexCoord.format = VK_FORMAT_R32G32_SFLOAT;
-    //VkVertexInputAttributeDescription vertexAttributes[] = { vertexAttributePosition, vertexAttributeNormal, vertexAttributeTangent, vertexAttributeTexCoord };
-
     m_inputAssemblyInfo.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
     m_viewport.x = 0.0f;
@@ -612,15 +587,6 @@ GraphicsPipeline::GraphicsPipeline(Device* device) : m_device(device)
     m_rasterizerInfo.lineWidth = 1.0f;
 
     m_multisampleInfo.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    //std::vector<VkPipelineColorBlendAttachmentState> colorBlendAttachmentStates;
-    //colorBlendAttachmentStates.reserve(m_colorAttachmentCount);
-    //for (uint32_t i = 0; i < m_colorAttachmentCount; i++)
-    //{
-    //    VkPipelineColorBlendAttachmentState state{};
-    //    state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    //    colorBlendAttachmentStates.push_back(state);
-    //}
 
     m_depthInfo.depthTestEnable = VK_TRUE;
     m_depthInfo.depthWriteEnable = VK_TRUE;
@@ -638,7 +604,7 @@ GraphicsPipeline::~GraphicsPipeline()
         destroy();
 }
 
-bool GraphicsPipeline::create(const std::unordered_set<Shader>& shaders)
+bool GraphicsPipeline::create(const std::unordered_set<Shader*>& shaders)
 {
     if (m_handle != VK_NULL_HANDLE)
         return false;
@@ -668,9 +634,9 @@ bool GraphicsPipeline::create(const std::unordered_set<Shader>& shaders)
         colorBlendInfo.pAttachments = m_colorBlendAttachmentStates.data();
     }
 
-    std::vector<VkPipelineShaderStageCreateInfo> shaderStages(shaders.size());
-    for (const Shader& sh : shaders)
-        shaderStages.push_back(sh.m_shaderStageInfo);
+    std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
+    for (const Shader* sh : shaders)
+        shaderStages.push_back(sh->m_shaderStageInfo);
 
     m_createInfo.stageCount = shaderStages.size();
     m_createInfo.pStages = shaderStages.data();
@@ -683,7 +649,7 @@ bool GraphicsPipeline::create(const std::unordered_set<Shader>& shaders)
     return res == VK_SUCCESS;
 }
 
-bool GraphicsPipeline::create(const std::unordered_set<Shader>& shaders, std::shared_ptr<PipelineLayout> layout, uint32_t width, uint32_t height)
+bool GraphicsPipeline::create(const std::unordered_set<Shader*>& shaders, std::shared_ptr<PipelineLayout> layout, uint32_t width, uint32_t height)
 {
     if (m_handle != VK_NULL_HANDLE)
         return false;
@@ -696,7 +662,7 @@ bool GraphicsPipeline::create(const std::unordered_set<Shader>& shaders, std::sh
     return create(shaders);
 }
 
-bool GraphicsPipeline::create(const std::unordered_set<Shader>& shaders, uint32_t width, uint32_t height)
+bool GraphicsPipeline::create(const std::unordered_set<Shader*>& shaders, uint32_t width, uint32_t height)
 {
     if (m_handle != VK_NULL_HANDLE)
         return false;
@@ -712,12 +678,6 @@ bool GraphicsPipeline::create(const std::unordered_set<Shader>& shaders, uint32_
     return create(shaders);
 }
 
-CommandBuffer::~CommandBuffer()
-{
-    if (m_handle != VK_NULL_HANDLE)
-        destroy();
-}
-
 bool CommandBuffer::create()
 {
     if (m_handle != VK_NULL_HANDLE)
@@ -731,25 +691,42 @@ bool CommandBuffer::create()
     return res == VK_SUCCESS;
 }
 
-void CommandBuffer::imageMemoryBarrier(Image& img, VkImageAspectFlags aspectMask, VkPipelineStageFlags srcStageMask, VkAccessFlags srcAccessMask, VkPipelineStageFlags dstStageMask, VkAccessFlags dstAccessMask, VkImageLayout newLayout)
+void CommandBuffer::bindGraphicsPipeline(GraphicsPipeline* pipeline)
+{
+    vkCmdBindPipeline(m_handle, VK_PIPELINE_BIND_POINT_GRAPHICS, *pipeline);
+    m_boundPipeline = *pipeline;
+    m_boundLayout = *pipeline->m_layout;
+}
+
+void CommandBuffer::imageMemoryBarrier(VkImage img, VkImageAspectFlags aspectMask, VkPipelineStageFlags2 srcStageMask, VkAccessFlags2 srcAccessMask, VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t arrayLayers, uint32_t mipLevels)
 {
     VkImageSubresourceRange subRange{};
     subRange.aspectMask = aspectMask;
     subRange.baseArrayLayer = 0u;
     subRange.baseMipLevel = 0u;
-    subRange.layerCount = img.m_createInfo.arrayLayers;
-    subRange.levelCount = img.m_createInfo.mipLevels;
+    subRange.layerCount = arrayLayers;
+    subRange.levelCount = mipLevels;
 
-    VkImageMemoryBarrier imageMemoryBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    VkImageMemoryBarrier2 imageMemoryBarrier{ VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+    imageMemoryBarrier.srcStageMask = srcStageMask;
     imageMemoryBarrier.srcAccessMask = srcAccessMask;
+    imageMemoryBarrier.dstStageMask = dstStageMask;
     imageMemoryBarrier.dstAccessMask = dstAccessMask;
-    imageMemoryBarrier.oldLayout = img.m_layout;
+    imageMemoryBarrier.oldLayout = oldLayout;
     imageMemoryBarrier.newLayout = newLayout;
     imageMemoryBarrier.image = img;
     imageMemoryBarrier.subresourceRange = subRange;
 
-    vkCmdPipelineBarrier(m_handle, srcStageMask, dstStageMask, 0u, 0u, nullptr, 0u, nullptr, 1u, &imageMemoryBarrier);
+    VkDependencyInfo dependencyInfo{ VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    dependencyInfo.imageMemoryBarrierCount = 1u;
+    dependencyInfo.pImageMemoryBarriers = &imageMemoryBarrier;
 
+    vkCmdPipelineBarrier2(m_handle, &dependencyInfo);
+}
+
+void CommandBuffer::imageMemoryBarrier(Image& img, VkImageAspectFlags aspectMask, VkPipelineStageFlags2 srcStageMask, VkAccessFlags2 srcAccessMask, VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask, VkImageLayout newLayout)
+{
+    imageMemoryBarrier(img, aspectMask, srcStageMask, srcAccessMask, dstStageMask, dstAccessMask, img.m_layout, newLayout, img.m_createInfo.arrayLayers, img.m_createInfo.mipLevels);
     img.m_layout = newLayout;
 }
 

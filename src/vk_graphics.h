@@ -70,14 +70,14 @@ public:
     Instance* m_instance;
     VkPhysicalDeviceType m_physicalDeviceType = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
     VkPhysicalDevice m_physicalDevice;
-    VkPhysicalDeviceFeatures m_enabledFeatures{};
+    VkPhysicalDeviceFeatures2 m_enabledFeatures{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
     std::vector<const char*> m_enabledExtensions;
     std::vector<QueueRequirements> m_queueRequirements;
     VkDeviceCreateInfo m_createInfo{ VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+    std::map<VkQueueFlags, uint32_t> m_queueFlagsToQueueFamily;
 
 private:
     VkDevice m_handle = VK_NULL_HANDLE;
-    std::map<VkQueueFlags, uint32_t> m_queueFlagsToQueueFamily;
 };
 
 class Swapchain
@@ -88,8 +88,8 @@ public:
 
     ~Swapchain();
 
-    bool create(VkSurfaceKHR surface, VkImageUsageFlags usage);
-    void destroy() { vkDestroySwapchainKHR(*m_device, m_handle, nullptr); }
+    bool create(GLFWwindow* window, VkImageUsageFlags usage);
+    void destroy();
     inline VkSwapchainKHR getHandle() const { return m_handle; }
 
     bool acquireNextImage(uint32_t* idx, VkSemaphore acquiredSemaphore) const;
@@ -103,6 +103,7 @@ public:
     std::vector<VkImage> m_images;
 
 private:
+    VkSurfaceKHR m_surface = VK_NULL_HANDLE;
     VkSwapchainKHR m_handle = VK_NULL_HANDLE;
 };
 
@@ -213,7 +214,7 @@ public:
 
     ~PipelineLayout();
 
-    bool create(const std::unordered_set<Shader>& shaders);
+    bool create(const std::unordered_set<Shader*>& shaders);
     void destroy();
     inline VkPipelineLayout getHandle() const { return m_handle; }
 
@@ -234,8 +235,8 @@ public:
 
     ~GraphicsPipeline();
 
-    bool create(const std::unordered_set<Shader>& shaders, std::shared_ptr<PipelineLayout> layout, uint32_t width, uint32_t height);
-    bool create(const std::unordered_set<Shader>& shaders, uint32_t width, uint32_t height);
+    bool create(const std::unordered_set<Shader*>& shaders, std::shared_ptr<PipelineLayout> layout, uint32_t width, uint32_t height);
+    bool create(const std::unordered_set<Shader*>& shaders, uint32_t width, uint32_t height);
     void destroy() { vkDestroyPipeline(*m_device, m_handle, nullptr); }
     inline VkPipeline getHandle() const { return m_handle; }
 
@@ -257,7 +258,7 @@ public:
     VkGraphicsPipelineCreateInfo m_createInfo{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
 
 private:
-    bool create(const std::unordered_set<Shader>& shaders);
+    bool create(const std::unordered_set<Shader*>& shaders);
 
     Device* m_device;
     VkPipeline m_handle = VK_NULL_HANDLE;
@@ -269,13 +270,15 @@ public:
     CommandBuffer(Device* device, VkCommandPool cmdPool) : m_device(device), m_cmdPool(cmdPool) {}
     CommandBuffer(const VkCommandPool&) = delete;
 
-    ~CommandBuffer();
+    ~CommandBuffer() {}
 
     bool create();
-    void destroy() { vkFreeCommandBuffers(*m_device, m_cmdPool, 1u, &m_handle); }
+    void free() { vkFreeCommandBuffers(*m_device, m_cmdPool, 1u, &m_handle); }
     inline VkCommandBuffer getHandle() const { return m_handle; }
 
-    void imageMemoryBarrier(Image& img, VkImageAspectFlags aspectMask, VkPipelineStageFlags srcStageMask, VkAccessFlags srcAccessMask, VkPipelineStageFlags dstStageMask, VkAccessFlags dstAccessMask, VkImageLayout newLayout);
+    void bindGraphicsPipeline(vk::GraphicsPipeline* pipeline);
+    void imageMemoryBarrier(VkImage img, VkImageAspectFlags aspectMask, VkPipelineStageFlags2 srcStageMask, VkAccessFlags2 srcAccessMask, VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t arrayLayers = 1u, uint32_t mipLevels = 1u);
+    void imageMemoryBarrier(Image& img, VkImageAspectFlags aspectMask, VkPipelineStageFlags2 srcStageMask, VkAccessFlags2 srcAccessMask, VkPipelineStageFlags2 dstStageMask, VkAccessFlags2 dstAccessMask, VkImageLayout newLayout);
 
     CommandBuffer& operator=(const CommandBuffer&) = delete;
     inline operator VkCommandBuffer() const { return m_handle; }
@@ -284,6 +287,9 @@ private:
     Device* m_device;
     VkCommandPool m_cmdPool;
     VkCommandBuffer m_handle = VK_NULL_HANDLE;
+    // TODO reference pipeline superclass
+    VkPipeline m_boundPipeline = VK_NULL_HANDLE;
+    VkPipelineLayout m_boundLayout = VK_NULL_HANDLE;
 };
 
 //class RenderContext

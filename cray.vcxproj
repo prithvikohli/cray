@@ -19,6 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="src\renderer.h" />
     <ClInclude Include="src\json.hpp" />
     <ClInclude Include="src\stb_image.h" />
     <ClInclude Include="src\stb_image_write.h" />
@@ -28,12 +29,15 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\renderer.cpp" />
     <ClCompile Include="src\vk_graphics.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="src\shaders\gbuffer.frag" />
     <None Include="src\shaders\gbuffer.vert" />
     <None Include="src\shaders\lighting.comp" />
+    <None Include="src\shaders\test.frag" />
+    <None Include="src\shaders\test.vert" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
